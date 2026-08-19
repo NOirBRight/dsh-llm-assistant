@@ -117,18 +117,20 @@ AC 编号在 [PLAN.md](./PLAN.md) 中被任务引用。**每条 AC 必须可判�
 
 ## S7 引用任务 TASK REFERENCE
 
-跨会话工作项的有界只读上下文（ADR-007、ADR-014）。
+跨会话工作项的有界只读上下文（ADR-007、ADR-014、ADR-015）。
 
 | AC | 标准 |
 |---|---|
-| AC-RECALL-1 | 席位“引用任务”列出可见主会话，当前任务固定首位，含标题与 cwd |
-| AC-RECALL-2 | 当前任务是默认候选；用户显式选择 B 时 B 覆盖当前 A |
-| AC-RECALL-3 | 任务解析为 lineage root + 显式 anchor + 最近相关后代，去重后最多 3 来源、每来源 ≤16 KiB |
-| AC-RECALL-4 | 内容经官方 `sessionReferenceResolver.prepare`，保留 untrusted 警告并排除 tool/thinking/嵌套注入 |
-| AC-RECALL-5 | 助理、值班、归档助理历史和 subagent 不作为来源；自引用被拒 |
-| AC-RECALL-6 | 普通消息不引用任务；首次/切换/刷新/rollover 后捕获，普通追问不重复注入 |
-| AC-RECALL-7 | 时间线只显示任务 receipt；来源裁剪或遗漏可见，不渲染原始 reference JSON |
-| AC-RECALL-8 | lineage 不完整时只使用可验证来源，不猜测合并独立 root |
+| AC-RECALL-1 | 席位没有“引用任务”按钮、picker、chip、刷新、更换或移除控件 |
+| AC-RECALL-2 | 用户发送时，客户端以不可见 `currentTask` 传递当前非 blank、非 subagent 主任务；host 不自动注入上下文 |
+| AC-RECALL-3 | `task_reference` 只注册在助理作用域；无参数调用默认使用当轮 currentTask anchor |
+| AC-RECALL-4 | `task` 参数可按标题或 task id 查找其他任务；精确/唯一匹配才读取，多条匹配返回候选 |
+| AC-RECALL-5 | 任务解析为 lineage root + 显式 anchor + 最近相关后代，去重后最多 3 来源、每来源 ≤16 KiB |
+| AC-RECALL-6 | 内容经官方 `sessionReferenceResolver.prepare`，保留 untrusted 警告并排除 tool/thinking/嵌套注入 |
+| AC-RECALL-7 | 助理、值班、归档助理历史和 subagent 不作为来源；自引用被拒 |
+| AC-RECALL-8 | 新引用使用标准 tool call/result 历史；原始 reference 不渲染为用户气泡，旧 receipt marker 仅兼容历史 |
+| AC-RECALL-9 | lineage 不完整时只使用可验证来源，不猜测合并独立 root |
+| AC-RECALL-10 | 新工具不恢复 worker 外派、bash、write、edit，也不改变 host / External Agents 全局 Exposure |
 
 ---
 

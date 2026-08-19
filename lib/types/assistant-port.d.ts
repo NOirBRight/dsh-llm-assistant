@@ -2,7 +2,7 @@
  * Host-side assistant port: projects the assistant session log into the wire
  * snapshot and drives user messages into the session (T1.2).
  */
-import type { AssistantSnapshot, GoalItem, ModelChrome, SendImage, SendReply, TaskAnchor, TaskReferenceReceipt, TodoItem } from './contract.ts';
+import type { AssistantSnapshot, GoalItem, ModelChrome, SendImage, SendReply, TodoItem } from './contract.ts';
 /** Host view of the live assistant agent (subset of dsh-agent's Agent). */
 export interface AssistantAgentView {
     readonly id: string;
@@ -80,23 +80,9 @@ export interface AttachmentStoreView {
 export interface AssistantChrome {
     readonly model?: ModelChrome;
 }
-export interface TaskReferencePort {
-    prepare(input: {
-        readonly agent: unknown;
-        readonly content: readonly unknown[];
-        readonly anchorSessionId: string;
-    }): Promise<{
-        readonly content: readonly unknown[];
-        readonly additionalContext?: unknown;
-        readonly receipt: TaskReferenceReceipt;
-    }>;
-}
 export interface AssistantPort {
     snapshot(): AssistantSnapshot;
-    send(text: string, images?: readonly SendImage[], task?: {
-        readonly anchor: TaskAnchor;
-        readonly refresh?: boolean;
-    }): Promise<SendReply>;
+    send(text: string, images?: readonly SendImage[]): Promise<SendReply>;
     readImage(attachmentId: string): Promise<{
         mediaType: string;
         dataBase64: string;
@@ -109,5 +95,5 @@ export declare function assistantBrief(events: readonly AssistantEvent[]): {
     goal: GoalItem | undefined;
     lastAssistant: string | undefined;
 };
-export declare function createAssistantPort(agent: AssistantAgentView, api: AssistantRuntimeApi, revision: () => number, chrome?: () => AssistantChrome, attachments?: AttachmentStoreView, taskReferences?: TaskReferencePort): AssistantPort;
+export declare function createAssistantPort(agent: AssistantAgentView, api: AssistantRuntimeApi, revision: () => number, chrome?: () => AssistantChrome, attachments?: AttachmentStoreView, taskReferenceAvailable?: boolean): AssistantPort;
 //# sourceMappingURL=assistant-port.d.ts.map

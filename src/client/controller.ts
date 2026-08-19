@@ -74,14 +74,13 @@ export class AssistantController {
   }
 
   /** Drive one user message (and optional images) into the assistant session. */
-  async send(text: string, images?: readonly { name: string; mediaType: string; dataBase64: string }[], task?: { anchor: TaskAnchor; refresh?: boolean }): Promise<boolean> {
+  async send(text: string, images?: readonly { name: string; mediaType: string; dataBase64: string }[], currentTask?: TaskAnchor): Promise<boolean> {
     const trimmed = text.trim()
     if (trimmed.length === 0 && (images === undefined || images.length === 0)) return false
     const payload = {
       text: trimmed,
       ...(images !== undefined && images.length > 0 ? { images } : {}),
-      ...(task === undefined ? {} : { task: task.anchor }),
-      ...(task?.refresh === true ? { refreshTaskContext: true } : {}),
+      ...(currentTask === undefined ? {} : { currentTask }),
     }
     const result = await this.#rpc.call(ASSISTANT_RPC_CHANNEL, ASSISTANT_SEND_ENDPOINT, payload)
     if (!result.ok) return false

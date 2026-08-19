@@ -9,19 +9,13 @@ import { MiniMarkdown } from './MiniMarkdown.tsx'
 import { AssistantContextMeter } from './ContextMeter.tsx'
 import { AssistantModelSelect } from './ModelSelect.tsx'
 import type { ChatImageRef, TimelineItem } from '../contract.ts'
+import { selectSessionList } from './session-list.ts'
 
 export interface AssistantSeatFace {
   controller: AssistantController
 }
 
 export type AssistantSeatProps = InjectFace<AssistantSeatFace> & PropsRuntime<'shell.overlay'>
-
-interface TaskBinding {
-  readonly sessionId: string
-  readonly label: string
-  readonly refresh: boolean
-  readonly assistantSessionId?: string
-}
 
 interface DraftImage {
   readonly id: string
@@ -36,9 +30,6 @@ export function AssistantSeat({ controller, useSessions }: AssistantSeatProps): 
   const [lastSeenSeq, setLastSeenSeq] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
   const [images, setImages] = useState<DraftImage[]>([])
-  const [task, setTask] = useState<TaskBinding | undefined>(() => readTaskBinding())
-  const [taskPickerOpen, setTaskPickerOpen] = useState(false)
-  const [taskSearch, setTaskSearch] = useState('')
   const [size, setSize] = useState({ width: 368, height: 483 })
   const [preview, setPreview] = useState<DraftImage | null>(null)
   const [sendError, setSendError] = useState<string | null>(null)
@@ -49,12 +40,11 @@ export function AssistantSeat({ controller, useSessions }: AssistantSeatProps): 
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const dragRef = useRef<{ startX: number; startY: number; width: number; height: number } | null>(null)
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
-  const sessionList = useSessions()
-  const taskCandidates = sessionList.ids
-    .map((id) => sessionList.byId[id])
-    .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined && entry.origin !== 'subagent' && !entry.blank)
-    .filter((entry) => taskSearch.trim() === '' || (entry.displayTitle + ' ' + (entry.cwd ?? '')).toLocaleLowerCase().includes(taskSearch.trim().toLocaleLowerCase()))
-    .sort((left, right) => left.id === sessionList.current ? -1 : right.id === sessionList.current ? 1 : right.updatedAt - left.updatedAt)
+  const sessionList = selectSessionList(useSessions)
+  const currentEntry = sessionList.current === undefined ? undefined : sessionList.byId[sessionList.current]
+  const currentTask = currentEntry === undefined || currentEntry.origin === 'subagent' || currentEntry.blank
+    ? undefined
+    : { sessionId: currentEntry.id, label: currentEntry.displayTitle }
 
   useEffect(() => {
     let cardObserver: ResizeObserver | undefined
@@ -111,18 +101,6 @@ export function AssistantSeat({ controller, useSessions }: AssistantSeatProps): 
   }, [])
 
   useEffect(() => {
-    writeTaskBinding(task)
-  }, [task])
-
-  useEffect(() => {
-    const assistantSessionId = snapshot?.sessionId
-    if (assistantSessionId === undefined) return
-    setTask((current) => current === undefined || current.assistantSessionId === assistantSessionId
-      ? current
-      : { ...current, refresh: true })
-  }, [snapshot?.sessionId])
-
-  useEffect(() => {
     controller.watch()
     return () => { controller.unwatch() }
   }, [controller])
@@ -177,13 +155,12 @@ export function AssistantSeat({ controller, useSessions }: AssistantSeatProps): 
     if (text.length === 0 && images.length === 0) return
     const payload = images.map((image) => ({ name: image.name, mediaType: image.mediaType, dataBase64: image.dataBase64 }))
     setSendError(null)
-    void controller.send(text.length === 0 && payload.length > 0 ? ' ' : text, payload, task === undefined ? undefined : { anchor: { sessionId: task.sessionId, label: task.label }, refresh: task.refresh }).then((ok) => {
+    void controller.send(text.length === 0 && payload.length > 0 ? ' ' : text, payload, currentTask).then((ok) => {
       if (!ok) {
         setSendError('发送失败，请重试')
         return
       }
       setDraft('')
-      if (task !== undefined) setTask({ ...task, refresh: false, ...(snapshot?.sessionId === undefined ? {} : { assistantSessionId: snapshot.sessionId }) })
       for (const image of images) URL.revokeObjectURL(image.previewUrl)
       setImages([])
     })
@@ -303,32 +280,6 @@ export function AssistantSeat({ controller, useSessions }: AssistantSeatProps): 
           {sendError !== null && <div className={cls.empty} style={{ padding: '4px 12px 0', margin: 0 }}>{sendError}</div>}
           <form className={cls.composer} onSubmit={(event) => { event.preventDefault(); send() }}>
             <div className={cls.card}>
-              {task !== undefined && (
-                <div className={cls.taskChip}>
-                  <span title={task.label}>任务 · {task.label}{task.refresh ? ' · 待刷新' : ''}</span>
-                  <button type="button" className={cls.taskChipButton} aria-label="刷新任务引用" title="下次发送重新捕获任务上下文" onClick={() => { setTask({ ...task, refresh: true }) }}>↻</button>
-                  <button type="button" className={cls.taskChipButton} aria-label="更换任务" onClick={() => { setTaskPickerOpen(true) }}>更换</button>
-                  <button type="button" className={cls.taskChipButton} aria-label="移除任务引用" onClick={() => { setTask(undefined); setTaskPickerOpen(false) }}>×</button>
-                </div>
-              )}
-              {taskPickerOpen && (
-                <div className={cls.taskPicker}>
-                  <input className={cls.taskSearch} value={taskSearch} placeholder="搜索任务" aria-label="搜索任务" onChange={(event) => { setTaskSearch(event.currentTarget.value) }} />
-                  <div className={cls.taskList}>
-                    {taskCandidates.map((entry) => (
-                      <button key={entry.id} type="button" className={cls.taskOption} onClick={() => {
-                        setTask({ sessionId: entry.id, label: entry.displayTitle, refresh: true })
-                        setTaskPickerOpen(false)
-                        setTaskSearch('')
-                      }}>
-                        {entry.displayTitle}{entry.id === sessionList.current ? ' · 当前' : ''}
-                        {entry.cwd !== undefined && <span className={cls.taskMeta}>{entry.cwd}</span>}
-                      </button>
-                    ))}
-                    {taskCandidates.length === 0 && <div className={cls.taskMeta}>没有可引用的任务</div>}
-                  </div>
-                </div>
-              )}
               {images.length > 0 && (
                 <div className={cls.rail}>
                   {images.map((image) => (
@@ -366,7 +317,6 @@ export function AssistantSeat({ controller, useSessions }: AssistantSeatProps): 
                 <div className={cls.tools}>
                   <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(event) => { onFiles(event.currentTarget.files); event.currentTarget.value = '' }} />
                   <button type="button" className={cls.add} aria-label="添加图片" onClick={() => { fileRef.current?.click() }}>+</button>
-                  <button type="button" className={cls.taskAction} disabled={snapshot?.taskReferenceAvailable === false} onClick={() => { setTaskPickerOpen((value) => !value) }}>引用任务</button>
                 </div>
                 <div className={cls.trailing}>
                   <AssistantModelSelect
@@ -502,34 +452,7 @@ function measurePetBottom(card: HTMLElement): number {
   return Math.max(0, Math.round(window.innerHeight - card.getBoundingClientRect().bottom))
 }
 
-const TASK_BINDING_KEY = 'dsh-llm-assistant.taskBinding'
 const LAST_SEEN_KEY = 'dsh-llm-assistant.lastSeenSeq'
-
-function readTaskBinding(): TaskBinding | undefined {
-  try {
-    const raw = window.localStorage.getItem(TASK_BINDING_KEY)
-    if (raw === null) return undefined
-    const value = JSON.parse(raw) as Partial<TaskBinding>
-    if (typeof value.sessionId !== 'string' || typeof value.label !== 'string') return undefined
-    return {
-      sessionId: value.sessionId,
-      label: value.label,
-      refresh: value.refresh !== false,
-      ...(typeof value.assistantSessionId === 'string' ? { assistantSessionId: value.assistantSessionId } : {}),
-    }
-  } catch {
-    return undefined
-  }
-}
-
-function writeTaskBinding(task: TaskBinding | undefined): void {
-  try {
-    if (task === undefined) window.localStorage.removeItem(TASK_BINDING_KEY)
-    else window.localStorage.setItem(TASK_BINDING_KEY, JSON.stringify(task))
-  } catch {
-    // Private mode / quota — binding remains active for this page only.
-  }
-}
 
 function readLastSeenSeq(sessionId: string): number | null {
   try {

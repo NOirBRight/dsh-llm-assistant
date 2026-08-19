@@ -177,8 +177,8 @@ export interface TaskAnchor {
 export interface SendRequest {
   readonly text: string
   readonly images?: readonly SendImage[]
-  readonly task?: TaskAnchor
-  readonly refreshTaskContext?: boolean
+  /** Invisible current-page task anchor available to the assistant's task_reference tool. */
+  readonly currentTask?: TaskAnchor
 }
 
 export interface SetModelRequest {
@@ -188,7 +188,7 @@ export interface SetModelRequest {
 }
 
 export type SendReply =
-  | { readonly sent: true; readonly task?: TaskReferenceReceipt }
+  | { readonly sent: true }
   | { readonly sent: false; readonly error: string }
 
 /** Wire RPC result, aligned with the Connection transport's RpcResult shape. */
@@ -206,14 +206,12 @@ export function decodeSendRequest(payload: unknown): SendRequest | undefined {
   const text = payload.text
   const images = decodeSendImages(payload.images)
   if (text.trim() === '' && images.length === 0) return undefined
-  const task = decodeTaskAnchor(payload.task)
-  if (payload.task !== undefined && task === undefined) return undefined
-  if (payload.refreshTaskContext !== undefined && typeof payload.refreshTaskContext !== 'boolean') return undefined
+  const currentTask = decodeTaskAnchor(payload.currentTask)
+  if (payload.currentTask !== undefined && currentTask === undefined) return undefined
   return {
     text,
     ...(images.length === 0 ? {} : { images }),
-    ...(task === undefined ? {} : { task }),
-    ...(payload.refreshTaskContext === true ? { refreshTaskContext: true } : {}),
+    ...(currentTask === undefined ? {} : { currentTask }),
   }
 }
 

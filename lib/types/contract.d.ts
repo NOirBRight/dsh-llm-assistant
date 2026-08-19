@@ -155,8 +155,8 @@ export interface TaskAnchor {
 export interface SendRequest {
     readonly text: string;
     readonly images?: readonly SendImage[];
-    readonly task?: TaskAnchor;
-    readonly refreshTaskContext?: boolean;
+    /** Invisible current-page task anchor available to the assistant's task_reference tool. */
+    readonly currentTask?: TaskAnchor;
 }
 export interface SetModelRequest {
     readonly model: string;
@@ -165,7 +165,6 @@ export interface SetModelRequest {
 }
 export type SendReply = {
     readonly sent: true;
-    readonly task?: TaskReferenceReceipt;
 } | {
     readonly sent: false;
     readonly error: string;

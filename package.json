@@ -27,6 +27,7 @@
     "build": "tsc -p tsconfig.json && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "e2e:lab": "node scripts/e2e-lab.mjs",
     "check": "pnpm run typecheck && pnpm run test"
   },
   "engines": {

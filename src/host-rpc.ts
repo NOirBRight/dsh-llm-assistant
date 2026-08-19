@@ -11,6 +11,7 @@ import {
   decodeSetModelRequest,
   isRecord,
   type RpcResult,
+  type TaskAnchor,
 } from './contract.ts'
 import type { AssistantPort } from './assistant-port.ts'
 
@@ -18,6 +19,7 @@ export interface AssistantRpcExtras {
   readonly setModel?: (model: string, effort?: string, provider?: string) => Promise<RpcResult<unknown>>
   readonly imageCapable?: () => boolean
   readonly rollover?: () => Promise<RpcResult<{ readonly sessionId: string }>>
+  readonly noteCurrentTask?: (task: TaskAnchor | undefined) => void
 }
 
 export async function handleAssistantRpc(
@@ -35,7 +37,8 @@ export async function handleAssistantRpc(
     if ((request.images?.length ?? 0) > 0 && extras.imageCapable?.() === false) {
       return fail('MODEL_DOES_NOT_SUPPORT_IMAGES', 'Model does not support image input.')
     }
-    return { ok: true, value: await port.send(request.text, request.images, request.task === undefined ? undefined : { anchor: request.task, ...(request.refreshTaskContext === true ? { refresh: true } : {}) }) }
+    extras.noteCurrentTask?.(request.currentTask)
+    return { ok: true, value: await port.send(request.text, request.images) }
   }
   if (endpoint === ASSISTANT_IMAGE_ENDPOINT) {
     const request = decodeImageRequest(payload)

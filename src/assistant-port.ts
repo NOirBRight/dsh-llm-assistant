@@ -12,7 +12,6 @@ import type {
   ModelChrome,
   SendImage,
   SendReply,
-  TaskAnchor,
   TaskReferenceReceipt,
   TimelineItem,
   TodoItem,
@@ -84,13 +83,9 @@ export interface AssistantChrome {
   readonly model?: ModelChrome
 }
 
-export interface TaskReferencePort {
-  prepare(input: { readonly agent: unknown; readonly content: readonly unknown[]; readonly anchorSessionId: string }): Promise<{ readonly content: readonly unknown[]; readonly additionalContext?: unknown; readonly receipt: TaskReferenceReceipt }>
-}
-
 export interface AssistantPort {
   snapshot(): AssistantSnapshot
-  send(text: string, images?: readonly SendImage[], task?: { readonly anchor: TaskAnchor; readonly refresh?: boolean }): Promise<SendReply>
+  send(text: string, images?: readonly SendImage[]): Promise<SendReply>
   readImage(attachmentId: string): Promise<{ mediaType: string; dataBase64: string } | undefined>
   sessionHasImages(): boolean
 }
@@ -116,7 +111,7 @@ export function createAssistantPort(
   revision: () => number,
   chrome: () => AssistantChrome = () => ({}),
   attachments?: AttachmentStoreView,
-  taskReferences?: TaskReferencePort,
+  taskReferenceAvailable = false,
 ): AssistantPort {
   return {
     snapshot(): AssistantSnapshot {
@@ -137,10 +132,10 @@ export function createAssistantPort(
         ...(projected.context !== undefined ? { context: projected.context } : {}),
         ...(projected.todos.length > 0 ? { todos: projected.todos } : {}),
         ...(projected.goal !== undefined ? { goal: projected.goal } : {}),
-        taskReferenceAvailable: taskReferences !== undefined,
+        taskReferenceAvailable,
       }
     },
-    async send(text: string, images?: readonly SendImage[], task?: { readonly anchor: TaskAnchor; readonly refresh?: boolean }): Promise<SendReply> {
+    async send(text: string, images?: readonly SendImage[]): Promise<SendReply> {
       const trimmed = text.trim()
       const incoming = images ?? []
       if (trimmed === '' && incoming.length === 0) return { sent: false, error: 'empty message' }
@@ -159,26 +154,8 @@ export function createAssistantPort(
           })
           content.push({ type: 'image', attachment })
         }
-        let outgoing: readonly unknown[] = content
-        let receipt: TaskReferenceReceipt | undefined
-        if (task !== undefined) {
-          if (taskReferences === undefined) return { sent: false, error: '任务引用功能不可用' }
-          const previous = latestTaskReceipt(agent.session.events)
-          if (task.refresh !== true && previous !== undefined && (previous.taskId === task.anchor.sessionId || previous.sourceSessionIds.includes(task.anchor.sessionId))) {
-            receipt = previous
-          } else {
-            const prepared = await taskReferences.prepare({ agent, content, anchorSessionId: task.anchor.sessionId })
-            outgoing = prepared.content
-            receipt = prepared.receipt
-            agent.inject(api.createUserMessage({
-              content: [{ type: 'text', text: JSON.stringify(prepared.receipt) }],
-              source: { kind: 'plugin', plugin: TASK_REFERENCE_PLUGIN },
-            }))
-            if (prepared.additionalContext !== undefined) agent.inject(prepared.additionalContext)
-          }
-        }
-        agent.followup(api.createUserMessage({ content: outgoing as typeof content, source: { kind: 'user' } }))
-        return { sent: true, ...(receipt === undefined ? {} : { task: receipt }) }
+        agent.followup(api.createUserMessage({ content, source: { kind: 'user' } }))
+        return { sent: true }
       } catch (error) {
         return { sent: false, error: error instanceof Error ? error.message : String(error) }
       }
@@ -289,7 +266,7 @@ function project(events: readonly AssistantEvent[]): {
       const callId = resultCallIdOf(data)
       const existing = tools.get(callId)
       if (existing !== undefined) {
-        const isError = data.isError === true
+        const isError = toolResultIsError(data)
         const updated: ToolItem = {
           ...existing,
           status: isError ? 'error' : 'done',
@@ -379,17 +356,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function latestTaskReceipt(events: readonly AssistantEvent[]): TaskReferenceReceipt | undefined {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]
-    if (event?.type === 'user/message') {
-      const receipt = taskReceiptMessage(event.data)
-      if (receipt !== undefined) return receipt
-    }
-  }
-  return undefined
-}
-
 function taskReceiptMessage(data: Record<string, unknown>): TaskReferenceReceipt | undefined {
   const source = data.source as { kind?: unknown; plugin?: unknown } | undefined
   if (source?.kind !== 'plugin' || source.plugin !== TASK_REFERENCE_PLUGIN) return undefined
@@ -431,7 +397,17 @@ function resultCallIdOf(data: Record<string, unknown>): string {
   if (typeof data.toolCallId === 'string') return data.toolCallId
   if (typeof data.callId === 'string') return data.callId
   if (typeof data.id === 'string') return data.id
-  return ''
+  const message = isObject(data.message) ? data.message : undefined
+  const source = message !== undefined && isObject(message.source) ? message.source : undefined
+  if (typeof source?.callId === 'string') return source.callId
+  const result = Array.isArray(message?.content) ? message.content.find((block) => isObject(block) && block.type === 'tool-result') : undefined
+  return isObject(result) && typeof result.toolCallId === 'string' ? result.toolCallId : ''
+}
+
+function toolResultIsError(data: Record<string, unknown>): boolean {
+  if (data.isError === true) return true
+  const message = isObject(data.message) ? data.message : undefined
+  return Array.isArray(message?.content) && message.content.some((block) => isObject(block) && block.type === 'tool-result' && block.isError === true)
 }
 
 function summarizeArgs(value: unknown): string {

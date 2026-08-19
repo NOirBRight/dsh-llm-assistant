@@ -352,7 +352,7 @@ record 复制、new-session flush 与 state 原子 rename；随后停用旧 sche
 
 ## ADR-014 任务引用复用官方快照，不创建隐藏 fork
 
-**状态**：已接受（用户批准落地计划）
+**状态**：已被 ADR-015 部分取代（官方快照与无 fork 保留；用户 picker/chip 数据流退役）
 
 **背景**：Side Chat 通过 `sessions.fork()` 固化主会话上下文，与常驻小管家的问答职责重叠。
 DSH rc.7 没有独立 Task 实体，但已有 `sessionQuery` 的 lineage 查询和
@@ -376,3 +376,29 @@ DSH rc.7 没有独立 Task 实体，但已有 `sessionQuery` 的 lineage 查询�
 
 **后果**：跨会话覆盖受 lineage 与 3 条来源限制；receipt 必须显式显示省略数。该限制换来可审计、
 有界且不改变 worker tool Exposure 的上下文读取。
+
+---
+
+## ADR-015 引用任务由小管家按需调用
+
+**状态**：已接受（用户明确修正产品行为）
+
+**背景**：ADR-014 把引用做成用户发送前选择的 picker 与粘性 chip，并由 host 自动注入快照。
+这会把“回答时是否需要任务背景”的判断负担转给用户，也使普通发送协议同时承担选择、刷新与注入状态。
+小管家本身已经是能判断信息缺口的 Agent；官方 tool call/result 又能提供比自造 receipt marker 更直接的审计历史。
+
+**决策**：
+
+1. 席位不再提供“引用任务”按钮、picker、chip、刷新、更换或移除控件。
+2. 席位随用户消息隐式传送当前主任务 anchor；它只是当轮可用的定位信息，不自动注入上下文。
+3. 仅助理作用域注册 `task_reference`。无参数调用使用当前页面任务；`task` 参数按标题或 task id 查找其他任务。
+   精确或唯一匹配才读取；多条匹配返回候选，不静默猜选。
+4. 工具继续复用 ADR-014 的 lineage adapter 与官方 `sessionReferenceResolver.prepare`，输出官方有界、只读、
+   带注入警告的文本。标准 tool call/result 是新历史记录；旧 receipt marker 只做既有 transcript 兼容。
+5. 值班与 host 不获得该工具；助理仍拒绝 worker 外派、bash、write、edit，External Agents 的全局 Exposure 不变。
+
+**不采用**：保留隐藏的自动注入、让用户管理粘性绑定、把当前页面内容每轮无条件塞入 prompt、
+在多个标题匹配时取第一条、恢复任何 worker 或文件/命令工具。
+
+**后果**：用户只提出任务相关问题，小管家在缺少事实时自行引用；无当前任务时工具明确返回不可用。
+每次调用重新取得官方快照，不形成订阅或长期绑定。当前页面 anchor 必须由客户端发送，因此 host 不假设全局“当前会话”。

@@ -18,7 +18,7 @@
 
 ## 安装
 
-需要 DeepSeek Harness Web（`web-app`，`0.1.0-rc.7`+）。插件会插入 `@deepseek-ai/dsh-schedule` 和 `@deepseek-ai/dsh-session-reference`。
+需要 DeepSeek Harness Web（`web-app`，`0.1.0-rc.7`+）。插件会插入 `@deepseek-ai/dsh-schedule`。`session-reference` 在 rc.8+ 由 web-app 提供；rc.7 由插件在缺失时补上，不再 insert 同 id。
 
 ```bash
 dsh plugin --profile web add github:NOirBRight/dsh-llm-assistant#v0.1.2

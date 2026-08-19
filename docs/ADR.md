@@ -364,7 +364,7 @@ DSH rc.7 没有独立 Task 实体，但已有 `sessionQuery` 的 lineage 查询�
 2. 席位的“引用任务”默认置顶当前任务，显式选择另一任务时以选择为准；身份由 session id 传递，
    不对自然语言任务名做猜测。
 3. 薄 adapter 只负责 root 解析、来源排序、排除助理/值班/subagent 和最多三条去重；读取、投影、
-   截断与 prompt-injection 警告全部交给官方 resolver。部署预算为每来源 16 KiB、最多 3 来源。
+   截断与 prompt-injection 警告全部交给官方 resolver。部署预算为每来源 64 KiB、最多 3 来源（官方默认）。rc.8+ 由 web-app 挂载 `session-reference`；插件不得再 insert 同 id。
 4. 任务 chip 粘性保持；首次、换任务、主动刷新或助理 rollover 后重新捕获。普通追问复用已有快照，
    避免重复注入。原始 reference JSON 不作为用户气泡呈现，只显示来源 receipt。
 5. 引用内容是只读且不可信，不能自行驱动投递、派单或权限改变。该能力是 host 数据流，不是模型工具。

@@ -27,6 +27,8 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import type { Context } from '@deepseek-ai/cordis'
+import { createHostModuleLoader } from './host-modules.ts'
+import { ensureSessionReference } from './session-reference-boot.ts'
 
 import { ASSISTANT_RPC_CHANNEL, type RpcResult, type TaskAnchor } from './contract.ts'
 import {
@@ -419,6 +421,15 @@ async function run(ctx: Context): Promise<void> {
   // Loader siblings mount concurrently; await the whole tree before creating an
   // Agent so its scoped tools (schedule among them) are fully composed.
   await (ctx.get('loader') as Loader | undefined)?.await()
+  const loadHost = createHostModuleLoader()
+  try {
+    if (loadHost !== undefined) {
+      const status = await ensureSessionReference(ctx, loadHost)
+      if (status === 'mounted') log('session-reference mounted (web-app did not provide it)')
+    }
+  } catch (error) {
+    log('WARN could not mount session-reference: ' + errMsg(error))
+  }
 
   const agents = ctx.get('agents') as AgentsService | undefined
   const defaultModel = ctx.get('agentDefaultModel') as AgentDefaultModel | undefined
@@ -438,15 +449,14 @@ async function run(ctx: Context): Promise<void> {
   const runtime = await resolveRuntimeApi()
   let assistantPreset: AssistantPreset | undefined
   try {
-    if (process.argv[1] !== undefined) {
-      const hostRequire = createRequire(realpathSync(process.argv[1]))
+    if (loadHost === undefined) {
+      log('WARN process.argv[1] is missing — private assistant preset will not mount')
+    } else {
       assistantPreset = createAssistantPreset({
         host: ctx,
-        load: (id) => import(pathToFileURL(hostRequire.resolve(id)).href),
+        load: loadHost,
         log,
       })
-    } else {
-      log('WARN process.argv[1] is missing — private assistant preset will not mount')
     }
   } catch (error) {
     log('WARN cannot resolve host modules for the private assistant preset: ' + errMsg(error))

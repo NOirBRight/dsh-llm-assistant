@@ -125,7 +125,7 @@ AC 编号在 [PLAN.md](./PLAN.md) 中被任务引用。**每条 AC 必须可判�
 | AC-RECALL-2 | 用户发送时，客户端以不可见 `currentTask` 传递当前非 blank、非 subagent 主任务；host 不自动注入上下文 |
 | AC-RECALL-3 | `task_reference` 只注册在助理作用域；无参数调用默认使用当轮 currentTask anchor |
 | AC-RECALL-4 | `task` 参数可按标题或 task id 查找其他任务；精确/唯一匹配才读取，多条匹配返回候选 |
-| AC-RECALL-5 | 任务解析为 lineage root + 显式 anchor + 最近相关后代，去重后最多 3 来源、每来源 ≤16 KiB |
+| AC-RECALL-5 | 任务解析为 lineage root + 显式 anchor + 最近相关后代，去重后最多 3 来源、每来源 ≤64 KiB |
 | AC-RECALL-6 | 内容经官方 `sessionReferenceResolver.prepare`，保留 untrusted 警告并排除 tool/thinking/嵌套注入 |
 | AC-RECALL-7 | 助理、值班、归档助理历史和 subagent 不作为来源；自引用被拒 |
 | AC-RECALL-8 | 新引用使用标准 tool call/result 历史；原始 reference 不渲染为用户气泡，旧 receipt marker 仅兼容历史 |

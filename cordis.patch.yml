@@ -1,12 +1,9 @@
 # 助理：一个不属于任何 workspace 的常驻 Agent，外加 shell.overlay 上的一个席位。
 # schedule 必须先于助理插入：工具只装给加载之后创建/恢复的 root Agent。
+# session-reference 在 rc.8+ 已由 web-app 挂载；这里不得再 insert 同 id。
+# rc.7 没有该行时，host 在 boot 里按需挂上（64 KiB / 最多 3 来源，与官方默认一致）。
 - insert:
     - id: schedule
       name: '@deepseek-ai/dsh-schedule'
-    - id: session-reference
-      name: '@deepseek-ai/dsh-session-reference'
-      config:
-        maxReferences: 3
-        maxReferenceBytes: 16384
     - id: llm-assistant
       name: 'dsh-llm-assistant'

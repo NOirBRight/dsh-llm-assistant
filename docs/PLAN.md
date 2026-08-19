@@ -200,7 +200,7 @@ ctx.agents.get(id: SessionId): Agent | undefined
 
 **实现**：`task-reference.ts` 用 `sessionQuery.traceSession` 把 task anchor 解析为 lineage，
 最多挑选 root / 显式 anchor / 最近后代三条，然后把读取、投影、预算和注入防护委托给
-`ctx.sessionReferenceResolver.prepare`。`cordis.patch.yml` 配置每来源 16 KiB。
+`ctx.sessionReferenceResolver.prepare`。预算与官方 session-reference 默认一致：每来源 64 KiB。rc.8+ 由 web-app 挂载该服务；rc.7 由助理在缺失时补上，不再 insert 同 id。
 
 席位通过 `useSessions` 只推导当轮不可见 `currentTask` anchor，不展示引用控件，也不自动注入。
 `task-reference-tool.ts` 仅在助理作用域注册 `task_reference`；无参数使用当前任务，带参数通过官方候选查询按标题或 task id 选择，歧义返回候选。工具结果直接渲染官方 reference 文本，并以标准 tool call/result 留痕；旧 plugin receipt marker 只保留投影兼容。Side Chat palette/pane/fork 路径继续退场。

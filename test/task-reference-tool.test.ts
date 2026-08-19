@@ -28,6 +28,30 @@ describe('task_reference tool seam', () => {
     expect(definition.output.render({}, result)).toEqual([{ type: 'text', text: '<referenced-sessions>官方快照</referenced-sessions>' }])
   })
 
+  it('refuses ambient task context for a casual greeting', async () => {
+    let prepared = false
+    const definition = createTaskReferenceToolDefinition({
+      currentTask: () => ({ sessionId: 'task-a', label: '任务 A' }),
+      adapter: () => ({
+        async prepare() {
+          prepared = true
+          throw new Error('must not read task context for a greeting')
+        },
+      }),
+      findTasks: async () => [],
+    })
+    const agent = {
+      session: {
+        events: [{ type: 'user/message', data: { message: { content: [{ type: 'text', text: '你好' }] } } }],
+      },
+    }
+
+    const result = await definition.execute({}, { agent })
+
+    expect(prepared).toBe(false)
+    expect(result).toEqual({ status: 'unavailable', reason: 'the current user message does not request task context; answer it directly' })
+  })
+
   it('selects another task by title instead of the current page task', async () => {
     const prepared: string[] = []
     const definition = createTaskReferenceToolDefinition({

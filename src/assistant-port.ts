@@ -4,6 +4,7 @@
  */
 
 import type {
+  AssistantDisplayBlock,
   AssistantItem,
   AssistantMessage,
   AssistantSnapshot,
@@ -128,6 +129,7 @@ export function createAssistantPort(
         ...(projected.pending !== '' ? { pending: projected.pending } : {}),
         ...(projected.thinking !== '' ? { thinking: projected.thinking } : {}),
         ...(status === 'running' && projected.currentTool !== undefined ? { currentTool: projected.currentTool } : {}),
+        ...(status === 'running' && projected.turnStartTime !== undefined ? { turnStartTime: projected.turnStartTime } : {}),
         ...(extra.model !== undefined ? { model: extra.model } : {}),
         ...(projected.context !== undefined ? { context: projected.context } : {}),
         ...(projected.todos.length > 0 ? { todos: projected.todos } : {}),
@@ -179,6 +181,7 @@ function project(events: readonly AssistantEvent[]): {
   readonly pending: string
   readonly thinking: string
   readonly currentTool: string | undefined
+  readonly turnStartTime: number | undefined
   readonly context: ContextChrome
   readonly todos: readonly TodoItem[]
   readonly goal: GoalItem | undefined
@@ -189,6 +192,7 @@ function project(events: readonly AssistantEvent[]): {
   let pendingParts: string[] = []
   let thinkingParts: string[] = []
   let currentTool: string | undefined
+  let turnStartTime: number | undefined
   let todos: TodoItem[] = []
   let goal: GoalItem | undefined
   let messageChars = 0
@@ -197,13 +201,15 @@ function project(events: readonly AssistantEvent[]): {
   for (const event of events) {
     const data = event.data
     if (event.type === 'turn/start' || event.type === 'step/start') {
+      if (event.type === 'turn/start') turnStartTime = event.time
       pendingParts = []
       thinkingParts = []
     } else if (event.type === 'assistant/message') {
       const message = data.message as { content?: readonly unknown[] } | undefined
-      const text = textOfBlocks(message?.content)
-      if (text !== '') {
-        const item: AssistantItem = { kind: 'assistant', seq: event.seq, text, time: event.time }
+      const blocks = assistantDisplayBlocksOf(message?.content)
+      const text = blocks.filter((block) => block.kind === 'text').map((block) => block.text).join('')
+      if (blocks.length > 0) {
+        const item: AssistantItem = { kind: 'assistant', seq: event.seq, text, blocks, time: event.time }
         items.push(item)
         messages.push({ seq: event.seq, role: 'assistant', text, source: 'model', time: event.time })
         messageChars += text.length
@@ -253,8 +259,10 @@ function project(events: readonly AssistantEvent[]): {
       const name = typeof data.name === 'string' ? data.name : 'tool'
       currentTool = name
       const callId = callIdOf(data)
-      const summary = summarizeArgs(data.arguments ?? data.args)
-      const item: ToolItem = { kind: 'tool', seq: event.seq, name, status: 'running', summary }
+      const rawInput = data.arguments ?? data.args
+      const summary = summarizeArgs(name, rawInput, callId)
+      const input = displayPayload(rawInput)
+      const item: ToolItem = { kind: 'tool', seq: event.seq, name, status: 'running', summary, ...(input === undefined ? {} : { input }) }
       tools.set(callId, item)
       items.push(item)
       toolChars += summary.length + name.length
@@ -267,17 +275,27 @@ function project(events: readonly AssistantEvent[]): {
       const existing = tools.get(callId)
       if (existing !== undefined) {
         const isError = toolResultIsError(data)
+        const output = toolResultText(data)
         const updated: ToolItem = {
           ...existing,
           status: isError ? 'error' : 'done',
-          summary: existing.summary !== '' ? existing.summary : summarizeResult(data),
+          summary: existing.summary,
+          ...(output === undefined ? {} : { output }),
         }
         tools.set(callId, updated)
         const index = items.findIndex((entry) => entry.kind === 'tool' && entry.seq === existing.seq)
         if (index >= 0) items[index] = updated
       }
     } else if (event.type === 'turn/end') {
+      for (const [callId, tool] of tools) {
+        if (tool.status !== 'running') continue
+        const stopped: ToolItem = { ...tool, status: 'stopped' }
+        tools.set(callId, stopped)
+        const index = items.findIndex((entry) => entry.kind === 'tool' && entry.seq === tool.seq)
+        if (index >= 0) items[index] = stopped
+      }
       currentTool = undefined
+      turnStartTime = undefined
       const reason = data.reason as { kind?: unknown; error?: { message?: unknown } } | undefined
       const errorText = reason?.kind === 'error' && typeof reason.error?.message === 'string' ? reason.error.message : undefined
       if (errorText !== undefined) {
@@ -299,7 +317,19 @@ function project(events: readonly AssistantEvent[]): {
     messages: Math.round(messageChars / 4),
   }
 
-  return { messages, items, pending: pendingParts.join(''), thinking: thinkingParts.join(''), currentTool, context, todos, goal }
+  return { messages, items, pending: pendingParts.join(''), thinking: thinkingParts.join(''), currentTool, turnStartTime, context, todos, goal }
+}
+
+function assistantDisplayBlocksOf(blocks: readonly unknown[] | undefined): AssistantDisplayBlock[] {
+  if (blocks === undefined) return []
+  const out: AssistantDisplayBlock[] = []
+  for (const block of blocks) {
+    const candidate = block as { type?: unknown; text?: unknown } | undefined
+    if ((candidate?.type === 'text' || candidate?.type === 'reasoning') && typeof candidate.text === 'string' && candidate.text !== '') {
+      out.push({ kind: candidate.type, text: candidate.text })
+    }
+  }
+  return out
 }
 
 function textOfBlocks(blocks: readonly unknown[] | undefined): string {
@@ -310,6 +340,38 @@ function textOfBlocks(blocks: readonly unknown[] | undefined): string {
     if (candidate?.type === 'text' && typeof candidate.text === 'string') out.push(candidate.text)
   }
   return out.join('')
+}
+
+function displayPayload(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  let parsed: unknown = value
+  if (typeof value === 'string') {
+    try { parsed = JSON.parse(value) as unknown } catch { return clipPayload(value) }
+  }
+  try { return clipPayload(JSON.stringify(parsed, null, 2)) } catch { return clipPayload(String(parsed)) }
+}
+
+function toolResultText(data: Record<string, unknown>): string | undefined {
+  const message = isObject(data.message) ? data.message : undefined
+  if (Array.isArray(message?.content)) {
+    for (const block of message.content) {
+      if (!isObject(block) || block.type !== 'tool-result') continue
+      const content = block.content
+      if (typeof content === 'string') return clipPayload(content)
+      if (Array.isArray(content)) {
+        const text = content.filter(isObject).filter((entry) => entry.type === 'text' && typeof entry.text === 'string').map((entry) => entry.text as string).join('')
+        if (text !== '') return clipPayload(text)
+      }
+      const shown = displayPayload(content)
+      if (shown !== undefined) return shown
+    }
+  }
+  return displayPayload(data.result ?? data.output)
+}
+
+function clipPayload(value: string): string {
+  const limit = 24_000
+  return value.length <= limit ? value : value.slice(0, limit) + '\n… truncated'
 }
 
 function imageRefsOf(blocks: readonly unknown[] | undefined): { attachmentId: string; mediaType: string; name?: string }[] {
@@ -410,28 +472,47 @@ function toolResultIsError(data: Record<string, unknown>): boolean {
   return Array.isArray(message?.content) && message.content.some((block) => isObject(block) && block.type === 'tool-result' && block.isError === true)
 }
 
-function summarizeArgs(value: unknown): string {
-  if (typeof value === 'string') {
-    try {
-      return summarizeArgs(JSON.parse(value) as unknown)
-    } catch {
-      return clip(value, 80)
-    }
+function summarizeArgs(name: string, value: unknown, callId: string): string {
+  const raw = typeof value === 'string' ? value : value === undefined ? '' : safeJson(value)
+  if (raw === '') return callId
+  let parsed: unknown
+  try { parsed = JSON.parse(raw) as unknown } catch { return clip(firstLine(raw), 80) }
+  if (!isObject(parsed)) return clip(firstLine(raw), 80)
+  const keys = SUMMARY_KEYS[toolVariant(name)]
+  for (const key of keys) {
+    const candidate = parsed[key]
+    if (typeof candidate === 'string' && candidate !== '') return clip(firstLine(candidate), 80)
   }
-  if (!isObject(value)) return ''
-  const command = value.command
-  if (typeof command === 'string') return clip(command, 80)
-  const path = value.path ?? value.file_path ?? value.filePath
-  if (typeof path === 'string') return clip(path, 80)
-  const title = value.title ?? value.name ?? value.query
-  if (typeof title === 'string') return clip(title, 80)
-  const keys = Object.keys(value)
-  return keys.length === 0 ? '' : clip(keys.join(', '), 80)
+  for (const candidate of Object.values(parsed)) {
+    if (typeof candidate === 'string' && candidate !== '') return clip(firstLine(candidate), 80)
+  }
+  return clip(firstLine(raw), 80)
 }
 
-function summarizeResult(data: Record<string, unknown>): string {
-  if (data.isError === true) return 'failed'
-  return 'done'
+function safeJson(value: unknown): string {
+  try { return JSON.stringify(value) } catch { return String(value) }
+}
+
+function firstLine(value: string): string {
+  const newline = value.indexOf('\n')
+  return newline === -1 ? value : value.slice(0, newline)
+}
+
+type ToolVariant = 'search' | 'read' | 'bash' | 'write' | 'edit' | 'code' | 'others'
+
+function toolVariant(name: string): ToolVariant {
+  return TOOL_VARIANTS[name] ?? 'others'
+}
+
+const TOOL_VARIANTS: Readonly<Record<string, ToolVariant>> = {
+  bash: 'bash', pwsh: 'bash', read: 'read', web_fetch: 'read', web_search: 'search', grep: 'search', glob: 'search',
+  write: 'write', edit: 'edit', run_code: 'code', cordis_package_inspect: 'read', cordis_runtime_inspect: 'read',
+  cordis_run: 'others', cordis_stop: 'others', cordis_undefine: 'others',
+}
+
+const SUMMARY_KEYS: Readonly<Record<ToolVariant, readonly string[]>> = {
+  bash: ['description', 'command'], read: ['path', 'file_path', 'url'], search: ['query', 'pattern', 'url'],
+  write: ['path', 'file_path'], edit: ['path', 'file_path'], code: ['description'], others: [],
 }
 
 function todosFromTool(name: string, raw: unknown): TodoItem[] | undefined {

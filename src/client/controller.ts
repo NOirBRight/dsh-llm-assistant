@@ -2,8 +2,8 @@
  * Browser-side assistant store: host RPC (snapshot/send) + live snapshot state.
  *
  * The host owns the assistant session; the panel only talks to it over the
- * Connection generic RPC channel. While a turn streams the controller polls
- * the snapshot (AC-CHAT-2/3); closing the panel stops polling without touching
+ * Connection generic RPC channel. While a turn streams the controller consumes
+ * token-level SSE frames with snapshot polling only as a reconnect fallback (AC-CHAT-2/3); closing the panel does not touch
  * the running turn, and reopening re-fetches the current state (AC-CHAT-4).
  * History always comes from the host's projection of the session log, so a
  * page refresh shows the same history (AC-CHAT-5).
@@ -12,6 +12,7 @@
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import {
+  ASSISTANT_EVENTS_ENDPOINT,
   ASSISTANT_IMAGE_ENDPOINT,
   ASSISTANT_RPC_CHANNEL,
   ASSISTANT_ROLLOVER_ENDPOINT,
@@ -21,6 +22,7 @@ import {
   type AssistantSnapshot,
   type TaskAnchor,
 } from '../contract.ts'
+import { applyAssistantStreamFrame, type AssistantStreamFrame } from '../snapshot-patch.ts'
 
 const POLL_INTERVAL_MS = 500
 const IDLE_POLL_INTERVAL_MS = 4000
@@ -34,6 +36,8 @@ export class AssistantController {
   #watching = false
   #fetching = false
   #fetchEpoch = 0
+  #stream: EventSource | undefined
+  #streamOpen = false
 
   constructor(ctx: ClientContext) {
     this.#rpc = (ctx.get('connection') as ConnectionHandle).rpc
@@ -51,6 +55,7 @@ export class AssistantController {
   /** Overlay mounted: keep a slow snapshot so the unread mark can move while the panel is closed. */
   watch(): void {
     this.#watching = true
+    this.#startStream()
     this.#setPoll(IDLE_POLL_INTERVAL_MS)
     void this.#fetch()
   }
@@ -58,13 +63,14 @@ export class AssistantController {
   /** Overlay unmounted. */
   unwatch(): void {
     this.#watching = false
+    this.#stopStream()
     this.#stopPolling()
   }
 
   /** Panel opened: load current state, then poll while the assistant is busy. */
   async open(): Promise<void> {
     await this.#fetch()
-    if (this.#snapshot?.status === 'running') this.#setPoll(POLL_INTERVAL_MS)
+    if (this.#snapshot?.status === 'running' && !this.#streamOpen) this.#setPoll(POLL_INTERVAL_MS)
     else this.#setPoll(IDLE_POLL_INTERVAL_MS)
   }
 
@@ -84,7 +90,7 @@ export class AssistantController {
     }
     const result = await this.#rpc.call(ASSISTANT_RPC_CHANNEL, ASSISTANT_SEND_ENDPOINT, payload)
     if (!result.ok) return false
-    this.#setPoll(POLL_INTERVAL_MS)
+    this.#setPoll(this.#streamOpen ? IDLE_POLL_INTERVAL_MS : POLL_INTERVAL_MS)
     await this.#fetch()
     return true
   }
@@ -120,6 +126,38 @@ export class AssistantController {
     return undefined
   }
 
+  #startStream(): void {
+    if (this.#stream !== undefined) return
+    const stream = new EventSource(ASSISTANT_EVENTS_ENDPOINT)
+    this.#stream = stream
+    stream.onopen = () => {
+      this.#streamOpen = true
+      this.#setPoll(IDLE_POLL_INTERVAL_MS)
+    }
+    stream.onerror = () => {
+      this.#streamOpen = false
+      if (this.#snapshot?.status === 'running') this.#setPoll(POLL_INTERVAL_MS)
+    }
+    stream.onmessage = (event) => {
+      try {
+        const frame = JSON.parse(event.data) as AssistantStreamFrame
+        if (!isAssistantStreamFrame(frame)) return
+        const next = applyAssistantStreamFrame(this.#snapshot, frame)
+        if (next === undefined) return
+        this.#snapshot = next
+        for (const listener of this.#listeners) listener()
+      } catch {
+        // Ignore one malformed frame; EventSource keeps the ordered stream alive.
+      }
+    }
+  }
+
+  #stopStream(): void {
+    this.#stream?.close()
+    this.#stream = undefined
+    this.#streamOpen = false
+  }
+
   #setPoll(ms: number): void {
     if (this.#pollTimer !== undefined && this.#pollMs === ms) return
     this.#stopPolling()
@@ -127,7 +165,7 @@ export class AssistantController {
     this.#pollTimer = setInterval(() => {
       void this.#fetch().then((snapshot) => {
         if (snapshot?.status === 'idle' && this.#watching) this.#setPoll(IDLE_POLL_INTERVAL_MS)
-        else if (snapshot?.status === 'running') this.#setPoll(POLL_INTERVAL_MS)
+        else if (snapshot?.status === 'running') this.#setPoll(this.#streamOpen ? IDLE_POLL_INTERVAL_MS : POLL_INTERVAL_MS)
       })
     }, ms)
   }
@@ -155,4 +193,12 @@ export class AssistantController {
       if (epoch === this.#fetchEpoch) this.#fetching = false
     }
   }
+}
+
+function isAssistantStreamFrame(value: unknown): value is AssistantStreamFrame {
+  if (typeof value !== 'object' || value === null || !('type' in value)) return false
+  const frame = value as { readonly type?: unknown; readonly snapshot?: unknown; readonly patch?: unknown; readonly delta?: unknown }
+  if (frame.type === 'snapshot') return typeof frame.snapshot === 'object' && frame.snapshot !== null
+  if (frame.type === 'patch') return typeof frame.patch === 'object' && frame.patch !== null
+  return frame.type === 'delta' && typeof frame.delta === 'object' && frame.delta !== null
 }

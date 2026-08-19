@@ -164,6 +164,7 @@ async function browserScenario() {
     const snapshot = await rpc('llm-assistant', 'assistant/snapshot')
     return snapshot.status === 'idle' && snapshot
   }, 'idle assistant before model turn', 180_000, 1_000)
+  await cdp.evaluate("(() => { const probe = { samples: [], ongoing: false }; window.__assistantRenderProbe = probe; const capture = () => { probe.ongoing ||= document.querySelector('.dsh-assistant-standard-activity')?.textContent?.includes('Deep diving...') === true; const node = document.querySelector('.dsh-assistant-standard-message[data-streaming]'); if (!node) return; const length = node.textContent?.length ?? 0; if (length > 0 && probe.samples.at(-1)?.length !== length) probe.samples.push({ length, time: performance.now() }); }; const root = document.querySelector('.dsh-assistant-panel-body'); window.__assistantRenderObserver?.disconnect(); window.__assistantRenderObserver = new MutationObserver(capture); if (root) window.__assistantRenderObserver.observe(root, { childList: true, characterData: true, subtree: true, attributes: true }); capture(); })()")
   const nonce = 'E2E_TASK_' + Date.now().toString(36)
   const prompt = '请查看当前页面任务的上下文，用一句话概括这项任务正在做什么；不要猜测，如果当前助理对话里没有这些事实就自行获取。成功取得任务上下文后必须用 TASK_CONTEXT_OK: 开头；如果取不到，不要输出这个前缀。最后原样附上 ' + nonce
   await cdp.evaluate("(() => { const node = document.querySelector('[aria-label=\"消息输入\"]'); const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set; setter.call(node, " + JSON.stringify(prompt) + "); node.dispatchEvent(new Event('input', { bubbles: true })); return node.value })()")
@@ -182,8 +183,16 @@ async function browserScenario() {
   assert(newItems.filter((item) => item.kind === 'tool').every((item) => item.name === 'task_reference'), 'referenced turn must not fall back to unrelated tools')
   assert(newItems.filter((item) => item.kind === 'task-reference').length === 0, 'new tool flow must not append a legacy task marker')
   assert(newItems.filter((item) => item.kind === 'user' && item.source === 'session-reference').length === 0, 'raw reference must not render as a user bubble')
-  await waitForDom("Array.from(document.querySelectorAll('.dsh-assistant-tool-title')).some((node) => node.textContent?.includes('task_reference'))", 'task_reference tool row', 30_000)
-  pass('real model autonomously calls task_reference without raw context bubbles')
+  await waitForDom("!!document.querySelector('.dsh-assistant-standard-tool[data-tool=\"task_reference\"][data-state=\"ok\"]')", 'standard task_reference tool row', 30_000)
+  const renderParity = JSON.parse(await cdp.evaluate("JSON.stringify({ standardTool: !!document.querySelector('.dsh-assistant-standard-tool [data-disclosure-row]'), standardMarkdown: !!document.querySelector('.dsh-assistant-standard-message'), officialToolStyles: !!document.querySelector('.dsh-assistant-standard-tool[data-official-styles=true]'), officialMessageStyles: !!document.querySelector('.dsh-assistant-standard-message[data-official-styles=true]'), legacyMarkdown: !!document.querySelector('.dsh-assistant-markdown, .dsh-assistant-caret') })"))
+  assert(renderParity.standardTool && renderParity.standardMarkdown, 'assistant must use standard main-chat tool and markdown renderers')
+  assert(renderParity.officialToolStyles && renderParity.officialMessageStyles, 'assistant must reference DSH-owned renderer styles')
+  assert(renderParity.legacyMarkdown === false, 'legacy assistant renderer must be absent')
+  const motion = JSON.parse(await cdp.evaluate("(() => { window.__assistantRenderObserver?.disconnect(); const message = document.querySelector('.dsh-assistant-standard-message'); const prose = message?.querySelector('p') ?? message?.querySelector('.dsh-assistant-standard-message-body > div'); const style = prose ? getComputedStyle(prose) : null; return JSON.stringify({ samples: window.__assistantRenderProbe?.samples ?? [], ongoing: window.__assistantRenderProbe?.ongoing ?? false, fontSize: style?.fontSize ?? null, lineHeight: style?.lineHeight ?? null }); })()"))
+  assert(motion.ongoing === true, 'main-window Deep diving turn status was not rendered')
+  assert(motion.fontSize === '13px' && motion.lineHeight === '20px', 'assistant prose typography must use the compact 13px/20px token: ' + JSON.stringify(motion))
+  assert(new Set(motion.samples.map((sample) => sample.length)).size >= 3, 'assistant text did not render as token-level SSE updates: ' + JSON.stringify(motion.samples))
+  pass('real model uses standard renderers, ongoing indicator, compact type, and token-level SSE')
 
   const errors = cdp.events.filter((event) => event.method === 'Runtime.exceptionThrown')
   const slotCrashes = cdp.events.filter((event) => event.method === 'Runtime.consoleAPICalled').some((event) => JSON.stringify(event.params).includes('slot entry crashed'))

@@ -8,6 +8,7 @@
  * and the host replies with `{type:'server-response', rpcId, result}`.
  */
 export declare const ASSISTANT_RPC_CHANNEL = "/llm-assistant";
+export declare const ASSISTANT_EVENTS_ENDPOINT = "/llm-assistant/events";
 export declare const ASSISTANT_SNAPSHOT_ENDPOINT = "assistant/snapshot";
 export declare const ASSISTANT_SEND_ENDPOINT = "assistant/send";
 export declare const ASSISTANT_SET_MODEL_ENDPOINT = "assistant/set-model";
@@ -32,11 +33,20 @@ export interface UserItem {
     readonly source: string;
     readonly images?: readonly ChatImageRef[];
 }
+/** Ordered assistant prose/reasoning blocks, matching main-chat AssistantMarkdown. */
+export type AssistantDisplayBlock = {
+    readonly kind: 'text';
+    readonly text: string;
+} | {
+    readonly kind: 'reasoning';
+    readonly text: string;
+};
 /** Assistant narration — full-width markdown, not a bubble. */
 export interface AssistantItem {
     readonly kind: 'assistant';
     readonly seq: number;
     readonly text: string;
+    readonly blocks?: readonly AssistantDisplayBlock[];
     readonly time: number;
 }
 /** Tool summary row — same 24px step-summary as the main agent. */
@@ -44,8 +54,10 @@ export interface ToolItem {
     readonly kind: 'tool';
     readonly seq: number;
     readonly name: string;
-    readonly status: 'running' | 'done' | 'error';
+    readonly status: 'running' | 'done' | 'error' | 'stopped';
     readonly summary: string;
+    readonly input?: string;
+    readonly output?: string;
 }
 /** Model / request failure — shown in-place so a silent turn is not mistaken for hang. */
 export interface ErrorItem {
@@ -122,6 +134,8 @@ export interface AssistantSnapshot {
     readonly sessionId: string;
     readonly seq: number;
     readonly status: 'idle' | 'running';
+    /** Start time of the currently open turn; drives the official elapsed activity clock. */
+    readonly turnStartTime?: number;
     readonly messages: readonly AssistantMessage[];
     readonly items: readonly TimelineItem[];
     readonly pending?: string;

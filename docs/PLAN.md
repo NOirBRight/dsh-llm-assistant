@@ -205,6 +205,8 @@ ctx.agents.get(id: SessionId): Agent | undefined
 席位通过 `useSessions` 只推导当轮不可见 `currentTask` anchor，不展示引用控件，也不自动注入。
 `task-reference-tool.ts` 仅在助理作用域注册 `task_reference`；无参数使用当前任务，带参数通过官方候选查询按标题或 task id 选择，歧义返回候选。工具结果直接渲染官方 reference 文本，并以标准 tool call/result 留痕；旧 plugin receipt marker 只保留投影兼容。Side Chat palette/pane/fork 路径继续退场。
 
+**陷阱（后续侧栏/文档兼容）**：`currentTask` anchor 只标识当前主任务 lineage，不代表当前界面里被打开、选中或指向的文档/Details 对象；`task_reference` 返回的只是任务快照，不能据此声称“小管家看到了这个文档”。在侧栏兼容完成前，遇到“这个文档/这里/当前选中的内容”等指代必须先澄清，最多把任务快照中的内容表述为候选。后续应另立 `currentArtifact` / `currentView` 类型的界面对象 anchor，携带稳定身份与类型，不得复用或扩义 `currentTask`。
+
 ---
 
 ### T2.2 投递（跨会话写）

@@ -1,18 +1,24 @@
 /** 席位：缩小版主聊天窗口。权限固定，不含 PermissionSelect。 */
 
-import { useEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type PointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type PointerEvent } from 'react'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { cls } from './css.ts'
 import type { AssistantController } from './controller.ts'
 import { WhaleMark } from './WhaleMark.tsx'
-import { MiniMarkdown } from './MiniMarkdown.tsx'
+import { StandardActivityIndicator, StandardAssistantMessage, StandardErrorRow, StandardFlowBody, StandardFlowColumn, StandardFlowItem, StandardReasoningRow, StandardToolRow, StandardUserMessage } from './StandardMessage.tsx'
 import { AssistantContextMeter } from './ContextMeter.tsx'
 import { AssistantModelSelect } from './ModelSelect.tsx'
 import type { ChatImageRef, TimelineItem } from '../contract.ts'
 import { selectSessionList } from './session-list.ts'
 
+export interface AssistantLocaleFace {
+  getSnapshot(): { readonly active: string; readonly revision: number }
+  subscribe(listener: () => void): () => void
+}
+
 export interface AssistantSeatFace {
   controller: AssistantController
+  locale: AssistantLocaleFace
 }
 
 export type AssistantSeatProps = InjectFace<AssistantSeatFace> & PropsRuntime<'shell.overlay'>
@@ -25,7 +31,7 @@ interface DraftImage {
   readonly previewUrl: string
 }
 
-export function AssistantSeat({ controller, useSessions }: AssistantSeatProps): JSX.Element {
+export function AssistantSeat({ controller, locale, useSessions }: AssistantSeatProps): JSX.Element {
   const [open, setOpen] = useState(false)
   const [lastSeenSeq, setLastSeenSeq] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
@@ -36,10 +42,12 @@ export function AssistantSeat({ controller, useSessions }: AssistantSeatProps): 
   const [rolloverBusy, setRolloverBusy] = useState(false)
   const [anchorBottom, setAnchorBottom] = useState(PET_DEFAULT_BOTTOM)
   const bodyRef = useRef<HTMLDivElement | null>(null)
+  const followOutputRef = useRef(true)
   const fileRef = useRef<HTMLInputElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const dragRef = useRef<{ startX: number; startY: number; width: number; height: number } | null>(null)
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
+  const localeSnapshot = useSyncExternalStore((listener) => locale.subscribe(listener), () => locale.getSnapshot())
   const sessionList = selectSessionList(useSessions)
   const currentEntry = sessionList.current === undefined ? undefined : sessionList.byId[sessionList.current]
   const currentTask = currentEntry === undefined || currentEntry.origin === 'subagent' || currentEntry.blank
@@ -135,10 +143,13 @@ export function AssistantSeat({ controller, useSessions }: AssistantSeatProps): 
   const context = snapshot?.context ?? { used: 1, cap: 128000, system: 0, tools: 0, messages: 1 }
   const contextSaturated = context.cap > 0 && context.used / context.cap >= 0.85
 
-
-  useEffect(() => {
-    const body = bodyRef.current
-    if (body !== null) body.scrollTop = body.scrollHeight
+  useLayoutEffect(() => {
+    if (!open || !followOutputRef.current) return
+    const frame = requestAnimationFrame(() => {
+      const body = bodyRef.current
+      if (body !== null) body.scrollTop = body.scrollHeight
+    })
+    return () => { cancelAnimationFrame(frame) }
   }, [open, items.length, pending, thinking, busy])
 
   useEffect(() => {
@@ -153,6 +164,7 @@ export function AssistantSeat({ controller, useSessions }: AssistantSeatProps): 
   const send = (): void => {
     const text = draft.trim()
     if (text.length === 0 && images.length === 0) return
+    followOutputRef.current = true
     const payload = images.map((image) => ({ name: image.name, mediaType: image.mediaType, dataBase64: image.dataBase64 }))
     setSendError(null)
     void controller.send(text.length === 0 && payload.length > 0 ? ' ' : text, payload, currentTask).then((ok) => {
@@ -230,11 +242,6 @@ export function AssistantSeat({ controller, useSessions }: AssistantSeatProps): 
           />
           <div className={cls.panelHead}>
             <span className={cls.panelTitle}>DeepSeek 小管家</span>
-            {busy && (
-              <span className={cls.status}>
-                {snapshot?.currentTool !== undefined ? `调用 ${snapshot.currentTool}…` : '思考中…'}
-              </span>
-            )}
             <button
               type="button"
               className={cls.newConversation}
@@ -252,19 +259,27 @@ export function AssistantSeat({ controller, useSessions }: AssistantSeatProps): 
             >{rolloverBusy ? '切换中' : '新对话'}</button>
             <button type="button" className={cls.close} aria-label="收起" onClick={() => { setOpen(false) }}>×</button>
           </div>
-          <div className={cls.panelBody} ref={bodyRef}>
+          <div
+            className={cls.panelBody}
+            ref={bodyRef}
+            onScroll={(event) => {
+              const body = event.currentTarget
+              followOutputRef.current = body.scrollHeight - body.scrollTop - body.clientHeight <= 25
+            }}
+          >
             {empty ? (
               <div className={cls.empty}>小管家还没说过话。发一条消息开始吧。</div>
             ) : (
-              <div className={cls.column}>
-                {items.map((item) => <TimelineRow key={item.kind + String(item.seq)} item={item} controller={controller} onOpenImage={(url, alt) => { setPreview({ id: url, name: alt, mediaType: 'image/png', dataBase64: '', previewUrl: url }) }} />)}
-                {thinking !== undefined && thinking.length > 0 && (
-                  <div className={cls.thinking}><span className={cls.thinkingLabel}>思考</span>{thinking}</div>
-                )}
-                {pending !== undefined && pending.length > 0 && (
-                  <div className={cls.assistant}><MiniMarkdown text={pending} streaming /></div>
-                )}
-              </div>
+              <StandardFlowColumn>
+                {items.map((item) => (
+                  <StandardFlowItem key={item.kind + String(item.seq)}>
+                    <TimelineRow item={item} controller={controller} locale={localeSnapshot.active} onOpenImage={(url, alt) => { setPreview({ id: url, name: alt, mediaType: 'image/png', dataBase64: '', previewUrl: url }) }} />
+                  </StandardFlowItem>
+                ))}
+                {thinking !== undefined && thinking.length > 0 && <StandardFlowItem><StandardReasoningRow text={thinking} running /></StandardFlowItem>}
+                {pending !== undefined && pending.length > 0 && <StandardFlowItem><StandardAssistantMessage text={pending} streaming /></StandardFlowItem>}
+                {busy && <StandardActivityIndicator startTime={snapshot?.turnStartTime} locale={localeSnapshot.active} />}
+              </StandardFlowColumn>
             )}
           </div>
           {(todos.length > 0 || goal !== undefined) && (
@@ -351,6 +366,7 @@ export function AssistantSeat({ controller, useSessions }: AssistantSeatProps): 
           setOpen((value) => {
             const next = !value
             if (next) {
+              followOutputRef.current = true
               const seq = controller.getSnapshot()?.seq ?? 0
               setLastSeenSeq(seq)
               const id = controller.getSnapshot()?.sessionId
@@ -362,7 +378,11 @@ export function AssistantSeat({ controller, useSessions }: AssistantSeatProps): 
         onKeyDown={(event) => {
           if (event.key !== 'Enter' && event.key !== ' ') return
           event.preventDefault()
-          setOpen((value) => !value)
+          setOpen((value) => {
+            const next = !value
+            if (next) followOutputRef.current = true
+            return next
+          })
         }}
       >
         <WhaleMark className={cls.petIcon} />
@@ -377,44 +397,40 @@ export function AssistantSeat({ controller, useSessions }: AssistantSeatProps): 
   )
 }
 
-function TimelineRow({ item, controller, onOpenImage }: {
+function TimelineRow({ item, controller, locale, onOpenImage }: {
   item: TimelineItem
   controller: AssistantController
+  locale: string
   onOpenImage: (url: string, alt: string) => void
 }): JSX.Element {
   if (item.kind === 'user') {
-    return (
-      <div className={cls.userRow}>
-        {item.images !== undefined && item.images.length > 0 && (
-          <div className={cls.userImages}>
-            {item.images.map((image) => (
-              <ChatImage key={image.attachmentId} image={image} controller={controller} onOpen={onOpenImage} />
-            ))}
-          </div>
-        )}
-        {item.text !== '' && <div className={cls.userBubble}>{item.text}</div>}
+    const images = item.images !== undefined && item.images.length > 0 ? (
+      <div className={cls.userImages}>
+        {item.images.map((image) => (
+          <ChatImage key={image.attachmentId} image={image} controller={controller} onOpen={onOpenImage} />
+        ))}
       </div>
-    )
+    ) : undefined
+    return <StandardUserMessage text={item.text} images={images} />
   }
   if (item.kind === 'task-reference') {
     const omitted = item.receipt.omittedSessions > 0 ? ' · 省略 ' + String(item.receipt.omittedSessions) + ' 条' : ''
     return <div className={cls.taskMarker}>已引用任务 · {item.receipt.label} · {String(item.receipt.sourceSessionIds.length)} 条来源{omitted}</div>
   }
   if (item.kind === 'error') {
-    return <div className={cls.error}>{item.text}</div>
+    return <StandardErrorRow text={item.text} locale={locale} />
   }
   if (item.kind === 'tool') {
-    return (
-      <div className={cls.tool} data-state={item.status} data-tool={item.name}>
-        <div className={cls.toolRow}>
-          <span className={cls.toolTitle}>{item.name}</span>
-          {item.summary !== '' && <span className={cls.toolSep} />}
-          {item.summary !== '' && <span className={cls.toolSummary}>{item.summary}</span>}
-        </div>
-      </div>
-    )
+    return <StandardToolRow name={item.name} summary={item.summary} status={item.status} input={item.input} output={item.output} />
   }
-  return <div className={cls.assistant}><MiniMarkdown text={item.text} /></div>
+  const blocks = item.blocks ?? [{ kind: 'text' as const, text: item.text }]
+  return (
+    <StandardFlowBody>
+      {blocks.map((block, index) => block.kind === 'reasoning'
+        ? <StandardReasoningRow key={index} text={block.text} running={false} />
+        : <StandardAssistantMessage key={index} text={block.text} />)}
+    </StandardFlowBody>
+  )
 }
 
 function messagesAsItems(messages: readonly { seq: number; role: 'user' | 'assistant'; text: string; source: string; time: number }[]): TimelineItem[] {

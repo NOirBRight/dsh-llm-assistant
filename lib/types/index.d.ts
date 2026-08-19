@@ -8,8 +8,8 @@
  *
  * T1.2 — expose the assistant to the seat panel over the Connection generic
  * RPC channel: snapshot (projected history + live status) and send (drive a
- * user message into the session). The client polls the snapshot while a turn
- * streams; the host projects from the session log, so a page refresh keeps the
+ * user message into the session). The host pushes each session chunk over SSE
+ * and serves projected snapshots for bootstrap/repair, so a page refresh keeps the
  * history (AC-CHAT-5).
  *
  * SessionId / createUserMessage are resolved from the running dsh entry at

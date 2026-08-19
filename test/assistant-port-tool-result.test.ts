@@ -37,8 +37,11 @@ describe('assistant tool timeline projection', () => {
     const api = { SessionId: (id: string) => id, createUserMessage: (input: unknown) => input } satisfies AssistantRuntimeApi
 
     expect(createAssistantPort(agent, api, () => 0).snapshot().turnStartTime).toBe(1_000)
+    expect(createAssistantPort(agent, api, () => 0).snapshot().status).toBe('running')
     events.push({ type: 'turn/end', seq: 3, time: 2_000, data: {} })
-    expect(createAssistantPort({ ...agent, status: 'idle' }, api, () => 0).snapshot().turnStartTime).toBeUndefined()
+    const ended = createAssistantPort({ ...agent, status: 'running' }, api, () => 0).snapshot()
+    expect(ended.turnStartTime).toBeUndefined()
+    expect(ended.status).toBe('idle')
   })
   it('projects an unfinished tool as stopped when its turn ends', () => {
     const agent = {

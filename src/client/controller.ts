@@ -25,15 +25,15 @@ import {
 import { applyAssistantStreamFrame, type AssistantStreamFrame } from '../snapshot-patch.ts'
 
 const POLL_INTERVAL_MS = 500
-const IDLE_POLL_INTERVAL_MS = 4000
 
 export class AssistantController {
   readonly #rpc: ConnectionHandle['rpc']
   #snapshot: AssistantSnapshot | undefined
   #listeners = new Set<() => void>()
   #pollTimer: ReturnType<typeof setInterval> | undefined
-  #pollMs = IDLE_POLL_INTERVAL_MS
+  #pollMs = 0
   #watching = false
+  #panelOpen = false
   #fetching = false
   #fetchEpoch = 0
   #stream: EventSource | undefined
@@ -45,6 +45,8 @@ export class AssistantController {
 
   readonly getSnapshot = (): AssistantSnapshot | undefined => this.#snapshot
 
+  readonly isPolling = (): boolean => this.#pollTimer !== undefined
+
   readonly subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener)
     return () => {
@@ -52,11 +54,10 @@ export class AssistantController {
     }
   }
 
-  /** Overlay mounted: keep a slow snapshot so the unread mark can move while the panel is closed. */
+  /** Overlay mounted: one snapshot plus SSE. No idle RPC poll while the panel is closed. */
   watch(): void {
     this.#watching = true
     this.#startStream()
-    this.#setPoll(IDLE_POLL_INTERVAL_MS)
     void this.#fetch()
   }
 
@@ -67,16 +68,17 @@ export class AssistantController {
     this.#stopPolling()
   }
 
-  /** Panel opened: load current state, then poll while the assistant is busy. */
+  /** Panel opened: load current state; poll only if SSE is down while a turn runs. */
   async open(): Promise<void> {
+    this.#panelOpen = true
     await this.#fetch()
-    if (this.#snapshot?.status === 'running' && !this.#streamOpen) this.#setPoll(POLL_INTERVAL_MS)
-    else this.#setPoll(IDLE_POLL_INTERVAL_MS)
+    this.#syncPoll()
   }
 
-  /** Panel closed: drop to the idle poll. The host keeps running the turn (AC-CHAT-4). */
+  /** Panel closed: stop snapshot polling. SSE still updates unread seq. */
   close(): void {
-    this.#setPoll(IDLE_POLL_INTERVAL_MS)
+    this.#panelOpen = false
+    this.#stopPolling()
   }
 
   /** Drive one user message (and optional images) into the assistant session. */
@@ -93,7 +95,7 @@ export class AssistantController {
       if (!result.ok) return false
       const value = result.value as { sent?: unknown }
       if (value.sent !== true) return false
-      this.#setPoll(this.#streamOpen ? IDLE_POLL_INTERVAL_MS : POLL_INTERVAL_MS)
+      this.#syncPoll()
       await this.#fetch()
       return true
     } catch {
@@ -147,19 +149,22 @@ export class AssistantController {
     this.#stream = stream
     stream.onopen = () => {
       this.#streamOpen = true
-      this.#setPoll(IDLE_POLL_INTERVAL_MS)
+      this.#syncPoll()
     }
     stream.onerror = () => {
       this.#streamOpen = false
-      if (this.#snapshot?.status === 'running') this.#setPoll(POLL_INTERVAL_MS)
+      this.#syncPoll()
     }
     stream.onmessage = (event) => {
       try {
         const frame = JSON.parse(event.data) as AssistantStreamFrame
         if (!isAssistantStreamFrame(frame)) return
+        const previous = this.#snapshot
         const next = applyAssistantStreamFrame(this.#snapshot, frame)
         if (next === undefined) return
         this.#snapshot = next
+        if (!this.#panelOpen && frame.type === 'delta') return
+        if (!this.#panelOpen && previous?.seq === next.seq && previous.sessionId === next.sessionId && previous.status === next.status) return
         for (const listener of this.#listeners) listener()
       } catch {
         // Ignore one malformed frame; EventSource keeps the ordered stream alive.
@@ -173,15 +178,21 @@ export class AssistantController {
     this.#streamOpen = false
   }
 
+  #syncPoll(): void {
+    const needPoll = this.#panelOpen && this.#watching && !this.#streamOpen && this.#snapshot?.status === 'running'
+    if (!needPoll) {
+      this.#stopPolling()
+      return
+    }
+    this.#setPoll(POLL_INTERVAL_MS)
+  }
+
   #setPoll(ms: number): void {
     if (this.#pollTimer !== undefined && this.#pollMs === ms) return
     this.#stopPolling()
     this.#pollMs = ms
     this.#pollTimer = setInterval(() => {
-      void this.#fetch().then((snapshot) => {
-        if (snapshot?.status === 'idle' && this.#watching) this.#setPoll(IDLE_POLL_INTERVAL_MS)
-        else if (snapshot?.status === 'running') this.#setPoll(this.#streamOpen ? IDLE_POLL_INTERVAL_MS : POLL_INTERVAL_MS)
-      })
+      void this.#fetch().then(() => { this.#syncPoll() })
     }, ms)
   }
 

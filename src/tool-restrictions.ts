@@ -27,6 +27,14 @@ const DENY_ASSISTANT_TOOLS = [
   ...DENY_BROWSER,
 ] as const
 
+/** Duty installs the heartbeat via session.append; the model must not mutate schedules. */
+export const DENY_DUTY_SCHEDULE = ['schedule_create', 'schedule_delete', 'schedule_list'] as const
+
+const DENY_DUTY_TOOLS = [
+  ...DENY_ASSISTANT_TOOLS,
+  ...DENY_DUTY_SCHEDULE,
+] as const
+
 const DENY_NAME_PREFIXES = ['worker_', 'browser_'] as const
 
 interface ScopedToolsService {
@@ -94,5 +102,5 @@ export function restrictAssistantTools(agentCtx: ToolScopeContext): void {
 }
 
 export function restrictDutyTools(agentCtx: ToolScopeContext): void {
-  keepDenied(agentCtx, DENY_ASSISTANT_TOOLS)
+  keepDenied(agentCtx, DENY_DUTY_TOOLS)
 }

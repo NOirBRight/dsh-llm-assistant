@@ -47,11 +47,13 @@ import { createTaskReferenceToolDefinition } from './task-reference-tool.ts'
 import { ASSISTANT_SAFETY_SECTION } from './assistant-prompt.ts'
 import {
   DUTY_PLUGIN,
-  alertTextOf,
+  bootDutyRelayCursor,
   briefJson,
   dutyCwd,
+  dutyRelayDecision,
   installHeartbeatSchedule,
-  latestDutySeq,
+  shouldReplaceDutySession,
+  shouldRotateDutyAfterQuiet,
 } from './duty.ts'
 
 /** Stable Cordis plugin name. */
@@ -292,24 +294,6 @@ function registerDutyBrief(agentCtx: { get(name: string): unknown }, assistantOf
   } catch (error) {
     log(`WARN assistant_brief register failed: ${errMsg(error)}`)
   }
-}
-
-async function createDuty(
-  agents: AgentsService,
-  sessionId: string,
-  cwd: string,
-  agentOptions: AgentOptions,
-  assistantOf: () => AssistantAgentView,
-): Promise<AssistantAgentView> {
-  return (await agents.create({
-    sessionId,
-    meta: { cwd },
-    agentOptions,
-    setup(agentCtx) {
-      restrictDutyTools(agentCtx)
-      registerDutyBrief(agentCtx, assistantOf)
-    },
-  })).agent
 }
 
 function lastLoggedSelection(events: readonly { type: string; data: Record<string, unknown> }[]): ModelSelection | undefined {
@@ -582,63 +566,86 @@ async function run(ctx: Context): Promise<void> {
 
   const dutyRoot = dutyCwd(home)
   mkdirSync(dutyRoot, { recursive: true })
+  let dutyHandle: AgentHandle | undefined
   let duty: AssistantAgentView | undefined
+  const setupDuty = (agentCtx: ToolScopeContext): void => {
+    restrictDutyTools(agentCtx)
+    registerDutyBrief(agentCtx, assistantOf)
+  }
+  const persistDuty = (next: AssistantAgentView, extra: Partial<PersistedState> = {}): void => {
+    persisted = { ...persisted, dutySessionId: next.id, ...extra }
+    writeState(file, persisted)
+  }
+  const replaceDuty = async (reason: string, previous?: AgentHandle): Promise<void> => {
+    const dutyId = runtime.SessionId('session-' + randomUUID())
+    dutyHandle = await agents.create({
+      sessionId: dutyId,
+      meta: { cwd: dutyRoot },
+      agentOptions,
+      setup: setupDuty,
+    })
+    duty = dutyHandle.agent
+    persistDuty(duty, { dutyRelayedSeq: 0 })
+    hideId(duty.id)
+    log('duty create (' + reason + ') id=' + duty.id)
+    if (previous !== undefined) void previous.dispose().catch((error) => log('WARN old duty dispose failed: ' + errMsg(error)))
+  }
   try {
     if (persisted.dutySessionId !== undefined) {
       try {
-        duty = (await agents.resume({
+        dutyHandle = await agents.resume({
           resumeSessionId: runtime.SessionId(persisted.dutySessionId),
           agentOptions,
-          setup(agentCtx) {
-            restrictDutyTools(agentCtx)
-            registerDutyBrief(agentCtx, assistantOf)
-          },
-        })).agent
-        log(`duty resume id=${duty.id} seq=${duty.session.seq}`)
+          setup: setupDuty,
+        })
+        duty = dutyHandle.agent
+        log('duty resume id=' + duty.id + ' seq=' + String(duty.session.seq))
+        if (shouldReplaceDutySession(duty.session.events)) {
+          log('duty session oversized seq=' + String(duty.session.seq) + ' — replacing')
+          await replaceDuty('oversized', dutyHandle)
+        }
       } catch (error) {
-        log(`duty resume of ${persisted.dutySessionId} failed (${errMsg(error)}); creating`)
-        const dutyId = runtime.SessionId(`session-${randomUUID()}`)
-        duty = await createDuty(agents, dutyId, dutyRoot, agentOptions, assistantOf)
-        persisted = { ...persisted, dutySessionId: duty.id, dutyRelayedSeq: 0 }
-        writeState(file, persisted)
-        log(`duty create (after failed resume) id=${duty.id}`)
+        log('duty resume of ' + persisted.dutySessionId + ' failed (' + errMsg(error) + '); creating')
+        await replaceDuty('after failed resume')
       }
     } else {
-      const dutyId = runtime.SessionId(`session-${randomUUID()}`)
-      duty = await createDuty(agents, dutyId, dutyRoot, agentOptions, assistantOf)
-      persisted = { ...persisted, dutySessionId: duty.id, dutyRelayedSeq: 0 }
-      writeState(file, persisted)
-      log(`duty create id=${duty.id}`)
+      await replaceDuty('fresh')
     }
-    hideId(duty.id)
-    logScheduleTools(tools, duty)
-    try {
-      installHeartbeatSchedule(duty)
-      log('duty heartbeat schedule installed')
-    } catch (error) {
-      log('ERROR duty heartbeat schedule install failed: ' + errMsg(error))
-    }
-    subscribeAssistantEvents(ctx, duty.id, { current: 0 }, () => { hideId(duty!.id) })
-    const onDuty = ctx.on.bind(ctx) as unknown as (name: string, listener: (session: { id: string }) => void) => unknown
-    onDuty('session/event', (session) => {
-      if (duty === undefined || session.id !== duty.id) return
-      const alert = alertTextOf(duty.session.events, persisted.dutyRelayedSeq ?? 0)
-      if (alert === undefined) return
-      const nextSeq = latestDutySeq(duty.session.events)
+    if (duty !== undefined) {
+      hideId(duty.id)
       try {
-        agent.followup(runtime.createUserMessage({
-          content: [{ type: 'text', text: `【值班】\n${alert}` }],
-          source: { kind: 'plugin', plugin: DUTY_PLUGIN },
-        }))
-        persisted = { ...persisted, dutyRelayedSeq: nextSeq }
-        writeState(file, persisted)
-        log('duty handed an alert to the assistant')
+        installHeartbeatSchedule(duty)
+        log('duty heartbeat schedule installed')
       } catch (error) {
-        log(`WARN duty relay failed: ${errMsg(error)}`)
+        log('ERROR duty heartbeat schedule install failed: ' + errMsg(error))
       }
-    })
+      const bootCursor = bootDutyRelayCursor(duty.session.events, persisted.dutyRelayedSeq)
+      if (persisted.dutyRelayedSeq !== bootCursor) persistDuty(duty, { dutyRelayedSeq: bootCursor })
+      const onDuty = ctx.on.bind(ctx) as unknown as (name: string, listener: (session: { id: string }, event: { type: string }) => void) => unknown
+      onDuty('session/event', (session, event) => {
+        if (duty === undefined || session.id !== duty.id) return
+        const decision = dutyRelayDecision(duty.session.events, persisted.dutyRelayedSeq ?? 0, event.type)
+        if (decision === undefined) return
+        if (decision.cursor !== persisted.dutyRelayedSeq) persistDuty(duty, { dutyRelayedSeq: decision.cursor })
+        if (decision.alert !== undefined) {
+          try {
+            agent.followup(runtime.createUserMessage({
+              content: [{ type: 'text', text: '【值班】\n' + decision.alert }],
+              source: { kind: 'plugin', plugin: DUTY_PLUGIN },
+            }))
+            log('duty handed an alert to the assistant')
+          } catch (error) {
+            log('WARN duty relay failed: ' + errMsg(error))
+          }
+        } else if (shouldRotateDutyAfterQuiet(duty.session.events)) {
+          void replaceDuty('quiet-rotate', dutyHandle).then(() => {
+            if (duty !== undefined) installHeartbeatSchedule(duty)
+          }).catch((error) => log('WARN duty quiet rotate failed: ' + errMsg(error)))
+        }
+      })
+    }
   } catch (error) {
-    log(`WARN duty session failed: ${errMsg(error)}`)
+    log('WARN duty session failed: ' + errMsg(error))
   }
   watchWorkerToolIsolation(ctx, tools, agent, () => duty)
 

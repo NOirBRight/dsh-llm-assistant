@@ -62,9 +62,9 @@ export function applyAssistantLiveDelta(
   seq: number,
   revision: number,
 ): AssistantSnapshot {
-  if (delta.kind === 'text') return { ...snapshot, seq, revision, pending: (snapshot.pending ?? '') + delta.text }
-  if (delta.kind === 'reasoning') return { ...snapshot, seq, revision, thinking: (snapshot.thinking ?? '') + delta.text }
-  return { ...snapshot, seq, revision, currentTool: delta.name }
+  if (delta.kind === 'text') return { ...snapshot, seq, revision, status: 'running', pending: (snapshot.pending ?? '') + delta.text }
+  if (delta.kind === 'reasoning') return { ...snapshot, seq, revision, status: 'running', thinking: (snapshot.thinking ?? '') + delta.text }
+  return { ...snapshot, seq, revision, status: 'running', currentTool: delta.name }
 }
 
 export function applyAssistantStreamFrame(snapshot: AssistantSnapshot | undefined, frame: AssistantStreamFrame): AssistantSnapshot | undefined {

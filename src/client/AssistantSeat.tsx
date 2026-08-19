@@ -11,7 +11,7 @@ import { StandardActivityIndicator, StandardAssistantMessage, StandardErrorRow, 
 import { AssistantContextMeter } from './ContextMeter.tsx'
 import { AssistantModelSelect } from './ModelSelect.tsx'
 import type { ChatImageRef, TimelineItem } from '../contract.ts'
-import { selectSessionList } from './session-list.ts'
+import { COMPOSER_ANCHOR_RETRY_MS } from './composer-anchor.ts'
 import { en, zh, type AssistantKey } from './locales.ts'
 import { nextUnreadBaseline, shouldShowUnread } from '../unread.ts'
 
@@ -55,11 +55,14 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
   const localeSnapshot = useSyncExternalStore((listener) => locale.subscribe(listener), () => locale.getSnapshot())
   const copy = (key: AssistantKey): string => localeText(localeSnapshot.active, key)
-  const sessionList = selectSessionList(useSessions)
-  const currentEntry = sessionList.current === undefined ? undefined : sessionList.byId[sessionList.current]
-  const currentTask = currentEntry === undefined || currentEntry.origin === 'subagent' || currentEntry.blank
-    ? undefined
-    : { sessionId: currentEntry.id, label: currentEntry.displayTitle }
+  const currentTaskRef = useRef<{ sessionId: string; label?: string } | undefined>(undefined)
+  useSessions((state) => {
+    const entry = state.current === undefined ? undefined : state.byId[state.current]
+    currentTaskRef.current = entry === undefined || entry.origin === 'subagent' || entry.blank
+      ? undefined
+      : { sessionId: entry.id, ...(entry.displayTitle === undefined ? {} : { label: entry.displayTitle }) }
+    return true
+  })
 
   useEffect(() => {
     let cardObserver: ResizeObserver | undefined
@@ -105,12 +108,12 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
       measure()
     }
     bind()
-    const retry = setInterval(bind, 400)
+    const retries = COMPOSER_ANCHOR_RETRY_MS.map((ms) => setTimeout(bind, ms))
     window.addEventListener('resize', measure)
     return () => {
       cardObserver?.disconnect()
       phaseObserver?.disconnect()
-      clearInterval(retry)
+      for (const retry of retries) clearTimeout(retry)
       window.removeEventListener('resize', measure)
     }
   }, [])
@@ -177,7 +180,7 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
     followOutputRef.current = true
     const payload = images.map((image) => ({ name: image.name, mediaType: image.mediaType, dataBase64: image.dataBase64 }))
     setSendError(null)
-    void controller.send(text.length === 0 && payload.length > 0 ? ' ' : text, payload, currentTask).then((ok) => {
+    void controller.send(text.length === 0 && payload.length > 0 ? ' ' : text, payload, currentTaskRef.current).then((ok) => {
       if (!ok) {
         setSendError(copy('sendFailed'))
         return

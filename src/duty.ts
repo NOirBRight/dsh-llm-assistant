@@ -9,6 +9,13 @@ export const HEARTBEAT_EVERY_SECONDS = 1800
 export const HEARTBEAT_QUIET = 'HEARTBEAT_QUIET'
 export const HEARTBEAT_ALERT = 'HEARTBEAT_ALERT'
 export const HEARTBEAT_SETUP_DONE = 'HEARTBEAT_SETUP_DONE'
+export const HEARTBEAT_SCHEDULE_ID = 'heartbeat'
+
+/** Replace a duty session before it can be resumed as a live root. */
+export const DUTY_MAX_TURNS = 20
+export const DUTY_MAX_SEQ = 80
+export const DUTY_MAX_EVENT_BYTES = 64 * 1024
+export const DUTY_QUIET_ROTATE_TURNS = 2
 
 export const HEARTBEAT_PROMPT = [
   'HEARTBEAT. You are the duty officer for the resident assistant, not the user-facing assistant.',
@@ -22,8 +29,14 @@ export function dutyCwd(home: string): string {
   return home.replace(/\/$/, '') + '/assistant-duty-workspace'
 }
 
-export function heartbeatEverySeconds(events: readonly AssistantEvent[]): number | undefined {
-  const active = new Map<string, number>()
+export interface HeartbeatRecord {
+  readonly id: string
+  readonly everySeconds: number
+  readonly prompt: string
+}
+
+export function foldEverySchedules(events: readonly AssistantEvent[]): Map<string, HeartbeatRecord> {
+  const active = new Map<string, HeartbeatRecord>()
   for (const event of events) {
     if (event.type !== 'schedule/change') continue
     const change = event.data as {
@@ -31,38 +44,29 @@ export function heartbeatEverySeconds(events: readonly AssistantEvent[]): number
       schedule?: { kind?: unknown; prompt?: unknown; id?: unknown; everySeconds?: unknown }
       id?: unknown
     }
-    if (change.operation === 'create' && change.schedule?.kind === 'every' && typeof change.schedule.prompt === 'string' && change.schedule.prompt.includes('HEARTBEAT')) {
-      if (typeof change.schedule.id === 'string' && typeof change.schedule.everySeconds === 'number') {
-        active.set(change.schedule.id, change.schedule.everySeconds)
-      }
+    if (change.operation === 'create' && change.schedule?.kind === 'every' && typeof change.schedule.id === 'string') {
+      const everySeconds = typeof change.schedule.everySeconds === 'number' ? change.schedule.everySeconds : 0
+      const prompt = typeof change.schedule.prompt === 'string' ? change.schedule.prompt : ''
+      active.set(change.schedule.id, { id: change.schedule.id, everySeconds, prompt })
     }
     if (change.operation === 'delete' && typeof change.id === 'string') active.delete(change.id)
   }
-  const first = active.values().next()
-  return first.done === true ? undefined : first.value
+  return active
+}
+
+export function heartbeatEverySeconds(events: readonly AssistantEvent[]): number | undefined {
+  return foldEverySchedules(events).get(HEARTBEAT_SCHEDULE_ID)?.everySeconds
 }
 
 export function hasHeartbeatSchedule(events: readonly AssistantEvent[]): boolean {
-  return heartbeatEverySeconds(events) === HEARTBEAT_EVERY_SECONDS
+  const record = foldEverySchedules(events).get(HEARTBEAT_SCHEDULE_ID)
+  return record !== undefined && record.everySeconds === HEARTBEAT_EVERY_SECONDS && foldEverySchedules(events).size === 1
 }
 
 export function staleHeartbeatIds(events: readonly AssistantEvent[]): string[] {
-  const stale = new Map<string, number>()
-  for (const event of events) {
-    if (event.type !== 'schedule/change') continue
-    const change = event.data as {
-      operation?: unknown
-      schedule?: { kind?: unknown; prompt?: unknown; id?: unknown; everySeconds?: unknown }
-      id?: unknown
-    }
-    if (change.operation === 'create' && change.schedule?.kind === 'every' && typeof change.schedule.prompt === 'string' && change.schedule.prompt.includes('HEARTBEAT')) {
-      if (typeof change.schedule.id === 'string' && typeof change.schedule.everySeconds === 'number') {
-        stale.set(change.schedule.id, change.schedule.everySeconds)
-      }
-    }
-    if (change.operation === 'delete' && typeof change.id === 'string') stale.delete(change.id)
-  }
-  return [...stale].filter(([, everySeconds]) => everySeconds !== HEARTBEAT_EVERY_SECONDS).map(([id]) => id)
+  return [...foldEverySchedules(events).values()]
+    .filter((record) => record.id !== HEARTBEAT_SCHEDULE_ID || record.everySeconds !== HEARTBEAT_EVERY_SECONDS)
+    .map((record) => record.id)
 }
 
 export function createHeartbeatSchedule(now = Date.now()): {
@@ -73,7 +77,7 @@ export function createHeartbeatSchedule(now = Date.now()): {
   readonly scheduledAt: string
 } {
   return {
-    id: 'heartbeat',
+    id: HEARTBEAT_SCHEDULE_ID,
     kind: 'every',
     prompt: HEARTBEAT_PROMPT,
     everySeconds: HEARTBEAT_EVERY_SECONDS,
@@ -87,6 +91,62 @@ export function installHeartbeatSchedule(agent: { readonly session: { readonly e
   }
   if (hasHeartbeatSchedule(agent.session.events)) return
   agent.session.append('schedule/change', { version: 1, operation: 'create', schedule: createHeartbeatSchedule() })
+}
+
+export function countDutyTurns(events: readonly AssistantEvent[]): number {
+  let turns = 0
+  for (const event of events) {
+    if (event.type === 'turn/start') turns += 1
+  }
+  return turns
+}
+
+export function dutySessionIsOversized(events: readonly AssistantEvent[]): boolean {
+  if (countDutyTurns(events) > DUTY_MAX_TURNS) return true
+  if (latestDutySeq(events) > DUTY_MAX_SEQ) return true
+  try {
+    return JSON.stringify(events).length > DUTY_MAX_EVENT_BYTES
+  } catch {
+    return events.length > DUTY_MAX_TURNS * 4
+  }
+}
+
+export function shouldReplaceDutySession(events: readonly AssistantEvent[]): boolean {
+  return dutySessionIsOversized(events)
+}
+
+export function lastAssistantText(events: readonly AssistantEvent[]): string | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event === undefined || event.type !== 'assistant/message') continue
+    const message = event.data.message as { content?: readonly unknown[] } | undefined
+    const text = textOf(message?.content)
+    if (text !== '') return text
+  }
+  return undefined
+}
+
+export function shouldRotateDutyAfterQuiet(events: readonly AssistantEvent[]): boolean {
+  const text = lastAssistantText(events)
+  if (text === undefined || !text.startsWith(HEARTBEAT_QUIET)) return false
+  return countDutyTurns(events) >= DUTY_QUIET_ROTATE_TURNS || dutySessionIsOversized(events)
+}
+
+export function isDutyRelayEvent(type: string): boolean {
+  return type === 'turn/end'
+}
+
+export function dutyRelayDecision(
+  events: readonly AssistantEvent[],
+  cursor: number,
+  eventType: string,
+): { readonly alert: string | undefined; readonly cursor: number } | undefined {
+  if (!isDutyRelayEvent(eventType)) return undefined
+  const nextCursor = latestDutySeq(events)
+  return {
+    alert: alertTextOf(events, cursor),
+    cursor: nextCursor,
+  }
 }
 
 export function alertTextOf(events: readonly AssistantEvent[], afterSeq: number): string | undefined {
@@ -109,6 +169,11 @@ export function latestDutySeq(events: readonly AssistantEvent[]): number {
     if (event.seq > seq) seq = event.seq
   }
   return seq
+}
+
+export function bootDutyRelayCursor(events: readonly AssistantEvent[], persisted: number | undefined): number {
+  if (persisted !== undefined) return persisted
+  return latestDutySeq(events)
 }
 
 function textOf(blocks: readonly unknown[] | undefined): string {

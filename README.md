@@ -2,6 +2,18 @@
 
 DeepSeek Harness 的常驻“DeepSeek 小管家”席位。它拥有独立、可滚动的助理会话，支持对话、图片、提醒和值班心跳。
 
+## 界面
+
+席位是右下角的鲸鱼，不绑在某个 workspace 上：没有打开项目时它也在。
+
+![关闭时的席位](docs/images/seat-closed.png)
+
+点开是缩小版对话窗。标题栏有「新对话」，composer 只有模型、上下文圈和发送；没有引用任务按钮。
+
+![打开的席位叠在主窗口上](docs/images/seat-open.png)
+
+![席位面板](docs/images/seat-panel.png)
+
 ## 安装
 
 需要 DeepSeek Harness Web（`web-app` bundle，`0.1.0-rc.7`+）。本包的 `cordis.patch.yml` 会插入 `@deepseek-ai/dsh-schedule` 与 `@deepseek-ai/dsh-session-reference`。
@@ -46,6 +58,9 @@ Runner 只接受 `http://127.0.0.1:3082`，会在真实浏览器中进入一条�
 ## 已知限制
 
 - 提醒与心跳依赖 DSH 进程及对应 live 会话；**助理或值班不活着时不会触发**。
+- 值班会话有界：超过约 20 个 turn / seq 80 / 64KiB 事件时 boot 会新建值班会话，不 resume 膨胀的 jsonl。安静心跳后也会轮换。
+- 心跳是 30 分钟一条 `every` 记录（id `heartbeat`）。boot 会删掉所有非 1800s 的值班 every 记录（含旧的 `schedule-2` @ 300s），再保证只剩这一条。
+- 值班模型看不到 `schedule_create` / `schedule_delete` / `schedule_list`；心跳由 host 写入 session log。
 - 本版本不做跨会话投递、派单、cron 日程层，也不提供工作台 Terminal/Browser/批注口。
 - 助理和值班会话不暴露 worker 外派、bash、write 或 edit。
 - 引用任务不创建 fork，也不复制完整 transcript。

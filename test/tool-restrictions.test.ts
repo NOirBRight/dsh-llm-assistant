@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { DENY_SPAWN, restrictAssistantTools, restrictDutyTools } from '../src/tool-restrictions.ts'
+import { DENY_DUTY_SCHEDULE, DENY_SPAWN, restrictAssistantTools, restrictDutyTools } from '../src/tool-restrictions.ts'
 
 class FakeToolPlane {
   readonly global = new Set<string>()
@@ -62,6 +62,15 @@ describe('assistant tool restrictions', () => {
       expect([...plane.denied]).toEqual(expect.arrayContaining([...DENY_SPAWN]))
       expect([...plane.global]).toEqual(expect.arrayContaining([...DENY_SPAWN]))
     }
+  })
+
+  it('hides schedule_create and schedule_delete from the duty agent', () => {
+    const plane = new FakeToolPlane()
+    for (const name of DENY_DUTY_SCHEDULE) plane.register(name)
+    restrictDutyTools(plane.agentCtx)
+    expect(plane.denied.has('schedule_create')).toBe(true)
+    expect(plane.denied.has('schedule_delete')).toBe(true)
+    expect(plane.denied.has('schedule_list')).toBe(true)
   })
 
   it('denies pwsh and later-registered worker_* names', () => {

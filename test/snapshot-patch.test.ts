@@ -15,6 +15,7 @@ describe('assistant SSE snapshot patches', () => {
 
     expect(next?.pending).toBe('你好')
     expect(next?.seq).toBe(11)
+    expect(next?.status).toBe('running')
   })
 
   it('emits only token-level live fields for one chunk event', () => {

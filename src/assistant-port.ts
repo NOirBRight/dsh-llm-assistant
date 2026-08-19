@@ -121,7 +121,7 @@ export function createAssistantPort(
   return {
     snapshot(): AssistantSnapshot {
       const projected = project(agent.session.events)
-      const status = agent.status === 'running' ? 'running' : 'idle'
+      const status = projected.turnStartTime !== undefined || projected.pending !== '' || projected.thinking !== '' ? 'running' : 'idle'
       const extra = chrome()
       return {
         sessionId: agent.id,

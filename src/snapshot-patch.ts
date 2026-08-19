@@ -16,6 +16,7 @@ export interface AssistantSnapshotPatch {
   readonly todos?: readonly TodoItem[] | null
   readonly goal?: GoalItem | null
   readonly taskReferenceAvailable?: boolean | null
+  readonly notice?: string | null
 }
 
 export type AssistantLiveDelta =
@@ -45,6 +46,7 @@ export function diffAssistantSnapshot(previous: AssistantSnapshot, next: Assista
   copyStructuredOptional(patch, 'todos', previous.todos, next.todos)
   copyStructuredOptional(patch, 'goal', previous.goal, next.goal)
   copyOptional(patch, 'taskReferenceAvailable', previous.taskReferenceAvailable, next.taskReferenceAvailable)
+  copyOptional(patch, 'notice', previous.notice, next.notice)
   return patch as AssistantSnapshotPatch
 }
 
@@ -88,4 +90,4 @@ function copyStructuredOptional(target: Record<string, unknown>, key: string, pr
   if (JSON.stringify(previous) !== JSON.stringify(next)) target[key] = next === undefined ? null : next
 }
 
-const OPTIONAL_KEYS = ['pending', 'thinking', 'currentTool', 'turnStartTime', 'model', 'context', 'todos', 'goal', 'taskReferenceAvailable'] as const
+const OPTIONAL_KEYS = ['pending', 'thinking', 'currentTool', 'turnStartTime', 'model', 'context', 'todos', 'goal', 'taskReferenceAvailable', 'notice'] as const

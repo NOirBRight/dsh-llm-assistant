@@ -27,13 +27,19 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:client": "tsc -p tsconfig.client.json --noEmit",
     "test": "vitest run",
     "e2e:lab": "node scripts/e2e-lab.mjs",
-    "check": "pnpm run typecheck && pnpm run test"
+    "check": "pnpm run typecheck && pnpm run typecheck:client && pnpm run test"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NOirBRight/dsh-llm-assistant.git"
+  },
+  "homepage": "https://github.com/NOirBRight/dsh-llm-assistant",
   "license": "MIT",
   "dsh": {
     "bundle": {

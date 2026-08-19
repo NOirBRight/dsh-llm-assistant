@@ -83,7 +83,17 @@ export interface TaskReferenceItem {
   readonly receipt: TaskReferenceReceipt
 }
 
-export type TimelineItem = UserItem | AssistantItem | ToolItem | ErrorItem | TaskReferenceItem
+/** Plugin-sourced turn (reminders, duty handoff, session rollover). Not a user bubble. */
+export interface PluginItem {
+  readonly kind: 'plugin'
+  readonly seq: number
+  readonly plugin: string
+  readonly text: string
+  readonly time: number
+  readonly source: string
+}
+
+export type TimelineItem = UserItem | AssistantItem | ToolItem | ErrorItem | TaskReferenceItem | PluginItem
 
 export interface ChatImageRef {
   readonly attachmentId: string
@@ -112,6 +122,7 @@ export interface ModelOption {
   readonly label: string
   readonly provider: string
   readonly efforts?: readonly ModelEffort[]
+  readonly contextWindow?: number
 }
 
 export interface ModelGroup {
@@ -161,6 +172,7 @@ export interface AssistantSnapshot {
   readonly todos?: readonly TodoItem[]
   readonly goal?: GoalItem
   readonly taskReferenceAvailable?: boolean
+  readonly notice?: string
   /** Monotonic counter bumped on every assistant-session event. */
   readonly revision: number
 }
@@ -216,6 +228,7 @@ export function decodeSendRequest(payload: unknown): SendRequest | undefined {
   if (typeof payload.text !== 'string') return undefined
   const text = payload.text
   const images = decodeSendImages(payload.images)
+  if (images === undefined) return undefined
   if (text.trim() === '' && images.length === 0) return undefined
   const currentTask = decodeTaskAnchor(payload.currentTask)
   if (payload.currentTask !== undefined && currentTask === undefined) return undefined
@@ -248,14 +261,18 @@ export function decodeSetModelRequest(payload: unknown): SetModelRequest | undef
   }
 }
 
-function decodeSendImages(value: unknown): SendImage[] {
-  if (!Array.isArray(value)) return []
+const MAX_IMAGE_BASE64_CHARS = 4_000_000
+
+function decodeSendImages(value: unknown): SendImage[] | undefined {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) return undefined
   const images: SendImage[] = []
   for (const entry of value) {
-    if (!isRecord(entry)) continue
-    if (typeof entry.name !== 'string' || entry.name.trim() === '') continue
-    if (typeof entry.mediaType !== 'string' || !entry.mediaType.startsWith('image/')) continue
-    if (typeof entry.dataBase64 !== 'string' || entry.dataBase64.length === 0) continue
+    if (!isRecord(entry)) return undefined
+    if (typeof entry.name !== 'string' || entry.name.trim() === '') return undefined
+    if (typeof entry.mediaType !== 'string' || !entry.mediaType.startsWith('image/')) return undefined
+    if (typeof entry.dataBase64 !== 'string' || entry.dataBase64.length === 0) return undefined
+    if (entry.dataBase64.length > MAX_IMAGE_BASE64_CHARS) return undefined
     images.push({ name: entry.name, mediaType: entry.mediaType, dataBase64: entry.dataBase64 })
   }
   return images

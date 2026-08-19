@@ -7,6 +7,7 @@ import type {} from '@deepseek-ai/dsh-client-connection/client'
 import { AssistantController } from './controller.ts'
 import { AssistantSeat, type AssistantLocaleFace } from './AssistantSeat.tsx'
 import { ensureAssistantStyles } from './css.ts'
+import { NS, en, zh } from './locales.ts'
 
 export const name = 'dsh-llm-assistant-client'
 export const inject = ['slots', 'layout', 'connection', 'locale']
@@ -14,8 +15,12 @@ export const inject = ['slots', 'layout', 'connection', 'locale']
 export function apply(ctx: ClientContext): void {
   ensureAssistantStyles()
 
+  const localeApi = (ctx as unknown as { readonly locale: AssistantLocaleFace & { register(ns: string, locale: string, dict: Record<string, string>): void } }).locale
+  localeApi.register(NS, 'zh', zh)
+  localeApi.register(NS, 'en', en)
+
   const controller = new AssistantController(ctx)
-  const locale = (ctx as unknown as { readonly locale: AssistantLocaleFace }).locale
+  const locale = localeApi
 
   // shell.overlay 是 ui-layout 声明的 list slot（scope: 'root'）：条目并存而非互相遮蔽，
   // 且不随会话切换重建 —— 这正是常驻助理需要的（AC-SEAT-4）。绝不要注册到 'root'。

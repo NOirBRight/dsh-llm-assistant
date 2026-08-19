@@ -35,10 +35,15 @@ export function registerAssistantSse(
   let current = port.snapshot()
 
   const send = (response: ServerResponse, frame: AssistantStreamFrame): void => {
-    response.write(`data: ${JSON.stringify(frame)}\n\n`)
+    try {
+      response.write('data: ' + JSON.stringify(frame) + '\n\n')
+    } catch {
+      connections.delete(response)
+      try { response.destroy() } catch { /* already gone */ }
+    }
   }
   const broadcast = (frame: AssistantStreamFrame): void => {
-    for (const response of connections) send(response, frame)
+    for (const response of [...connections]) send(response, frame)
   }
 
   ctx.effect(() => {
@@ -76,6 +81,7 @@ export function registerAssistantSse(
     listener: (session: { readonly id: string }, event: SessionEventView) => void,
   ) => unknown
   on('session/event', (session, event) => {
+    try {
     if (session.id !== currentSessionId()) return
     if (current.sessionId !== session.id) {
       current = port.snapshot()
@@ -94,6 +100,9 @@ export function registerAssistantSse(
     const patch = diffAssistantSnapshot(current, next)
     current = next
     if (Object.keys(patch).length > 0) broadcast({ type: 'patch', patch })
+    } catch {
+      // A broken client must not take down the host session listener.
+    }
   })
 }
 

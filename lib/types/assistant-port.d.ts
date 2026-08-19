@@ -79,6 +79,8 @@ export interface AttachmentStoreView {
 }
 export interface AssistantChrome {
     readonly model?: ModelChrome;
+    readonly contextCap?: number;
+    readonly notice?: string;
 }
 export interface AssistantPort {
     snapshot(): AssistantSnapshot;

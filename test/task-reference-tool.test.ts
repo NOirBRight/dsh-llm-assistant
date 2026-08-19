@@ -75,4 +75,61 @@ describe('task_reference tool seam', () => {
     expect(result.status).toBe('referenced')
     expect(result.status === 'referenced' && result.task.label).toBe('任务 B')
   })
+
+  it('returns candidates when two tasks share the same title', async () => {
+    let prepared = false
+    const definition = createTaskReferenceToolDefinition({
+      currentTask: () => ({ sessionId: 'task-a', label: '任务 A' }),
+      adapter: () => ({
+        async prepare() {
+          prepared = true
+          throw new Error('must not guess among matching titles')
+        },
+      }),
+      findTasks: async () => [
+        { sessionId: 'task-b1', label: '同名任务' },
+        { sessionId: 'task-b2', label: '同名任务' },
+      ],
+    })
+
+    const result = await definition.execute({ task: '同名任务' }, { agent: { id: 'assistant' } })
+
+    expect(prepared).toBe(false)
+    expect(result).toEqual({
+      status: 'choose',
+      candidates: [
+        { sessionId: 'task-b1', label: '同名任务' },
+        { sessionId: 'task-b2', label: '同名任务' },
+      ],
+    })
+  })
+
+  it('does not use the sticky current-page task on a plugin-sourced turn', async () => {
+    let prepared = false
+    const definition = createTaskReferenceToolDefinition({
+      currentTask: () => ({ sessionId: 'task-a', label: '任务 A' }),
+      adapter: () => ({
+        async prepare() {
+          prepared = true
+          throw new Error('must not reuse the previous page task')
+        },
+      }),
+      findTasks: async () => [],
+    })
+    const agent = {
+      session: {
+        events: [{
+          type: 'user/message',
+          data: {
+            source: { kind: 'plugin', plugin: 'dsh-llm-assistant-duty' },
+            content: [{ type: 'text', text: '【值班】有一件卡住的待办' }],
+          },
+        }],
+      },
+    }
+
+    const result = await definition.execute({}, { agent })
+    expect(prepared).toBe(false)
+    expect(result.status).toBe('unavailable')
+  })
 })

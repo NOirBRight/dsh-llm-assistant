@@ -9,9 +9,11 @@ describe('standard main-chat rendering parity', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2_792_000))
     const html = renderToStaticMarkup(<StandardActivityIndicator startTime={0} locale="zh" />)
+    const en = renderToStaticMarkup(<StandardActivityIndicator startTime={0} locale="en" />)
 
-    expect(html).toContain('Deep diving...')
+    expect(html).toContain('正在深入思考')
     expect(html).toContain('46分32秒')
+    expect(en).toContain('Deep diving...')
     expect(html).not.toContain('>Thinking<')
     expect(html).not.toContain('data-state="ongoing"')
   })

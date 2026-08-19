@@ -316,11 +316,11 @@ RPC 会锁错形状。
 
 **决策**：
 
-1. **入口属于席位 chrome**。在 composer 右侧现有 model / context / send 一行，把一个紧凑的
-   席位按钮放在 ContextMeter 左侧，常态文案「新对话」。ContextMeter ≥ 85% 时按钮进入警示色，
-   tooltip / 辅助文案改为「上下文将满，新开一条继续」；不照抄主聊天的 Continue 样式。助理
-   正在 running 时禁用，提示「助理回复完再新开」，避免切走半个 turn。一次点击直接执行，不再
-   加确认框。
+1. **入口属于席位 chrome**。紧凑按钮放在面板标题栏（标题右侧、最大化/关闭左侧），常态文案
+   「新对话」。不放进 composer 的 model / context / send 行：窄席位里那一行已经满了，挤进去会
+   把发送区挤乱（3082 实测）。ContextMeter ≥ 85% 时按钮进入警示色，tooltip / 辅助文案改为
+   「上下文将满，新开一条继续」；不照抄主聊天的 Continue 样式。助理正在 running 时禁用，提示
+   「助理回复完再新开」，避免切走半个 turn。一次点击直接执行，不再加确认框。
 2. **交接是有界的结构化首条消息**。host 为新会话写入一条来源标记为本插件的
    `【助理会话交接】`，只含：当前 goal（若有）、所有未完成 todo、这些字段及最近一组已完成
    对话中明确出现的必要绝对路径（去重、有数量上限）。若没有 goal / todo，则补一行「当前焦点」：
@@ -346,7 +346,7 @@ RPC 会锁错形状。
 
 **实现证据**：`session-rollover.ts` 在旧、新 agent 的 maintenance 临界区内完成交接、精确 schedule
 record 复制、new-session flush 与 state 原子 rename；随后停用旧 schedule 并释放旧 agent handle。
-`assistant/rollover` 不接收 sessionId。`AssistantSeat.tsx` 的席位按钮在 ContextMeter 左侧，85% 时警示。
+`assistant/rollover` 不接收 sessionId。`AssistantSeat.tsx` 的席位按钮在标题栏，85% 时警示。
 
 ---
 

@@ -52,11 +52,14 @@ export function createTaskReferenceToolDefinition(deps: TaskReferenceToolDepende
       const adapter = deps.adapter()
       if (adapter === undefined) return { status: 'unavailable', reason: 'task reference services are unavailable' }
       const requested = taskQuery(args)
-      let anchor = requested === undefined ? deps.currentTask() : undefined
+      let anchor = requested === undefined ? currentPageTask(deps.currentTask, exec.agent) : undefined
       if (requested !== undefined) {
         const candidates = await deps.findTasks(requested, exec.agent)
-        const exact = candidates.find((candidate) => candidate.sessionId === requested || candidate.label.toLocaleLowerCase() === requested.toLocaleLowerCase())
-        if (exact !== undefined) anchor = { sessionId: exact.sessionId, label: exact.label }
+        const idExact = candidates.filter((candidate) => candidate.sessionId === requested)
+        const titleExact = candidates.filter((candidate) => candidate.label.toLocaleLowerCase() === requested.toLocaleLowerCase())
+        if (idExact.length === 1) anchor = { sessionId: idExact[0]!.sessionId, label: idExact[0]!.label }
+        else if (titleExact.length === 1) anchor = { sessionId: titleExact[0]!.sessionId, label: titleExact[0]!.label }
+        else if (titleExact.length > 1) return { status: 'choose', candidates: titleExact }
         else if (candidates.length === 1) anchor = { sessionId: candidates[0]!.sessionId, label: candidates[0]!.label }
         else if (candidates.length > 1) return { status: 'choose', candidates }
         else return { status: 'unavailable', reason: 'no matching task found' }
@@ -70,7 +73,13 @@ export function createTaskReferenceToolDefinition(deps: TaskReferenceToolDepende
   }
 }
 
-function latestUserText(agent: unknown): string | undefined {
+function currentPageTask(currentTask: () => TaskAnchor | undefined, agent: unknown): TaskAnchor | undefined {
+  const latest = latestUserMessage(agent)
+  if (latest !== undefined && latest.sourceKind === 'plugin') return undefined
+  return currentTask()
+}
+
+function latestUserMessage(agent: unknown): { text: string; sourceKind: string } | undefined {
   if (!isRecord(agent) || !isRecord(agent.session) || !Array.isArray(agent.session.events)) return undefined
   for (let index = agent.session.events.length - 1; index >= 0; index -= 1) {
     const event = agent.session.events[index]
@@ -81,9 +90,16 @@ function latestUserText(agent: unknown): string | undefined {
       .map((block) => isRecord(block) && block.type === 'text' && typeof block.text === 'string' ? block.text : '')
       .join('')
       .trim()
-    if (text !== '') return text
+    if (text === '') continue
+    const source = isRecord(event.data.source) ? event.data.source : isRecord(message.source) ? message.source : undefined
+    const sourceKind = source !== undefined && typeof source.kind === 'string' ? source.kind : 'user'
+    return { text, sourceKind }
   }
   return undefined
+}
+
+function latestUserText(agent: unknown): string | undefined {
+  return latestUserMessage(agent)?.text
 }
 
 function isClearlyAmbientRequest(text: string): boolean {

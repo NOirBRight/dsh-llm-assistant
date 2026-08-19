@@ -15,6 +15,7 @@ export interface AssistantSnapshotPatch {
     readonly todos?: readonly TodoItem[] | null;
     readonly goal?: GoalItem | null;
     readonly taskReferenceAvailable?: boolean | null;
+    readonly notice?: string | null;
 }
 export type AssistantLiveDelta = {
     readonly kind: 'text';

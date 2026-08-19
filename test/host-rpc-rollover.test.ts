@@ -6,7 +6,7 @@ import type { AssistantPort } from '../src/assistant-port.ts'
 
 const port = {
   snapshot: () => { throw new Error('unused') },
-  send: async () => ({ accepted: true as const }),
+  send: async () => ({ sent: true as const }),
   readImage: async () => undefined,
   sessionHasImages: () => false,
 } satisfies AssistantPort
@@ -20,5 +20,14 @@ describe('assistant rollover RPC seam', () => {
       value: { sessionId: 'session-new' },
     })
     expect(rollover).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a rollover payload that names a sessionId', async () => {
+    const rollover = vi.fn(async () => ({ ok: true as const, value: { sessionId: 'session-new' } }))
+    await expect(handleAssistantRpc(port, ASSISTANT_ROLLOVER_ENDPOINT, { sessionId: 'session-other' }, { rollover })).resolves.toEqual({
+      ok: false,
+      error: { code: 'bad-request', message: 'invalid assistant/rollover request' },
+    })
+    expect(rollover).not.toHaveBeenCalled()
   })
 })

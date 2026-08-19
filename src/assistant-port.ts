@@ -11,6 +11,7 @@ import type {
   ContextChrome,
   GoalItem,
   ModelChrome,
+  PluginItem,
   SendImage,
   SendReply,
   TaskReferenceReceipt,
@@ -82,6 +83,8 @@ export interface AttachmentStoreView {
 
 export interface AssistantChrome {
   readonly model?: ModelChrome
+  readonly contextCap?: number
+  readonly notice?: string
 }
 
 export interface AssistantPort {
@@ -131,10 +134,11 @@ export function createAssistantPort(
         ...(status === 'running' && projected.currentTool !== undefined ? { currentTool: projected.currentTool } : {}),
         ...(status === 'running' && projected.turnStartTime !== undefined ? { turnStartTime: projected.turnStartTime } : {}),
         ...(extra.model !== undefined ? { model: extra.model } : {}),
-        ...(projected.context !== undefined ? { context: projected.context } : {}),
+        ...(projected.context !== undefined ? { context: withContextCap(projected.context, extra.contextCap) } : {}),
         ...(projected.todos.length > 0 ? { todos: projected.todos } : {}),
         ...(projected.goal !== undefined ? { goal: projected.goal } : {}),
         taskReferenceAvailable,
+        ...(extra.notice !== undefined ? { notice: extra.notice } : {}),
       }
     },
     async send(text: string, images?: readonly SendImage[]): Promise<SendReply> {
@@ -238,6 +242,19 @@ function project(events: readonly AssistantEvent[]): {
       if (source?.kind === 'plugin' && source.plugin === TASK_REFERENCE_PLUGIN) {
         const receipt = taskReceiptMessage(data)
         if (receipt !== undefined) items.push({ kind: 'task-reference', seq: event.seq, receipt })
+      } else if (source?.kind === 'plugin' && typeof source.plugin === 'string') {
+        const text = textOfBlocks(data.content as readonly unknown[] | undefined)
+        if (text !== '') {
+          const item: PluginItem = {
+            kind: 'plugin',
+            seq: event.seq,
+            plugin: source.plugin,
+            text,
+            time: event.time,
+            source: sourceLabel(data.source),
+          }
+          items.push(item)
+        }
       } else if (source?.kind === 'user') {
         const text = textOfBlocks(data.content as readonly unknown[] | undefined)
         const images = imageRefsOf(data.content as readonly unknown[] | undefined)
@@ -258,7 +275,7 @@ function project(events: readonly AssistantEvent[]): {
     } else if (event.type === 'tool/call') {
       const name = typeof data.name === 'string' ? data.name : 'tool'
       currentTool = name
-      const callId = callIdOf(data)
+      const callId = callIdOf(data, event.seq)
       const rawInput = data.arguments ?? data.args
       const summary = summarizeArgs(name, rawInput, callId)
       const input = displayPayload(rawInput)
@@ -449,10 +466,15 @@ function sourceLabel(source: unknown): string {
   return 'unknown'
 }
 
-function callIdOf(data: Record<string, unknown>): string {
+function callIdOf(data: Record<string, unknown>, seq: number): string {
   if (typeof data.id === 'string') return data.id
   if (typeof data.callId === 'string') return data.callId
-  return 'seq:' + String(data.seq ?? Math.random())
+  return 'seq:' + String(typeof data.seq === 'number' ? data.seq : seq)
+}
+
+function withContextCap(context: ContextChrome, cap: number | undefined): ContextChrome {
+  if (cap === undefined || cap <= 0) return context
+  return { ...context, cap, used: Math.min(context.used, cap) }
 }
 
 function resultCallIdOf(data: Record<string, unknown>): string {

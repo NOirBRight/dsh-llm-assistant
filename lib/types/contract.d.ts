@@ -77,7 +77,16 @@ export interface TaskReferenceItem {
     readonly seq: number;
     readonly receipt: TaskReferenceReceipt;
 }
-export type TimelineItem = UserItem | AssistantItem | ToolItem | ErrorItem | TaskReferenceItem;
+/** Plugin-sourced turn (reminders, duty handoff, session rollover). Not a user bubble. */
+export interface PluginItem {
+    readonly kind: 'plugin';
+    readonly seq: number;
+    readonly plugin: string;
+    readonly text: string;
+    readonly time: number;
+    readonly source: string;
+}
+export type TimelineItem = UserItem | AssistantItem | ToolItem | ErrorItem | TaskReferenceItem | PluginItem;
 export interface ChatImageRef {
     readonly attachmentId: string;
     readonly mediaType: string;
@@ -101,6 +110,7 @@ export interface ModelOption {
     readonly label: string;
     readonly provider: string;
     readonly efforts?: readonly ModelEffort[];
+    readonly contextWindow?: number;
 }
 export interface ModelGroup {
     readonly id: string;
@@ -146,6 +156,7 @@ export interface AssistantSnapshot {
     readonly todos?: readonly TodoItem[];
     readonly goal?: GoalItem;
     readonly taskReferenceAvailable?: boolean;
+    readonly notice?: string;
     /** Monotonic counter bumped on every assistant-session event. */
     readonly revision: number;
 }

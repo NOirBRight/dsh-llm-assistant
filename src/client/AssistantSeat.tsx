@@ -12,6 +12,8 @@ import { AssistantContextMeter } from './ContextMeter.tsx'
 import { AssistantModelSelect } from './ModelSelect.tsx'
 import type { ChatImageRef, TimelineItem } from '../contract.ts'
 import { selectSessionList } from './session-list.ts'
+import { en, zh, type AssistantKey } from './locales.ts'
+import { nextUnreadBaseline, shouldShowUnread } from '../unread.ts'
 
 export interface AssistantLocaleFace {
   getSnapshot(): { readonly active: string; readonly revision: number }
@@ -52,6 +54,7 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
   const dragRef = useRef<{ startX: number; startY: number; width: number; height: number } | null>(null)
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
   const localeSnapshot = useSyncExternalStore((listener) => locale.subscribe(listener), () => locale.getSnapshot())
+  const copy = (key: AssistantKey): string => localeText(localeSnapshot.active, key)
   const sessionList = selectSessionList(useSessions)
   const currentEntry = sessionList.current === undefined ? undefined : sessionList.byId[sessionList.current]
   const currentTask = currentEntry === undefined || currentEntry.origin === 'subagent' || currentEntry.blank
@@ -134,7 +137,10 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
       writeLastSeenSeq(id, seq)
       return
     }
-    setLastSeenSeq(readLastSeenSeq(id))
+    const stored = readLastSeenSeq(id)
+    const baseline = nextUnreadBaseline(stored, seq)
+    if (stored === null) writeLastSeenSeq(id, baseline)
+    setLastSeenSeq(baseline)
   }, [snapshot?.sessionId, snapshot?.seq, open])
 
   const items = snapshot?.items ?? messagesAsItems(snapshot?.messages ?? [])
@@ -173,7 +179,7 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
     setSendError(null)
     void controller.send(text.length === 0 && payload.length > 0 ? ' ' : text, payload, currentTask).then((ok) => {
       if (!ok) {
-        setSendError('发送失败，请重试')
+        setSendError(copy('sendFailed'))
         return
       }
       setDraft('')
@@ -257,7 +263,7 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
   return (
     <div className={cls.root}>
       {open && (
-        <div className={cls.panel} role="dialog" aria-label="DeepSeek 小管家" data-maximized={maximized || undefined} style={maximized ? undefined : { width: size.width, height: size.height, bottom: anchorBottom }}>
+        <div className={cls.panel} role="dialog" aria-label={copy('title')} data-maximized={maximized || undefined} style={maximized ? undefined : { width: size.width, height: size.height, bottom: anchorBottom }}>
           <div
             className={cls.resize}
             onPointerDown={onResizeStart}
@@ -266,14 +272,14 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
             onPointerCancel={onResizeEnd}
           />
           <div className={cls.panelHead}>
-            <span className={cls.panelTitle}>DeepSeek 小管家</span>
+            <span className={cls.panelTitle}>{copy('title')}</span>
             <button
               type="button"
               className={cls.newConversation}
               data-warning={contextSaturated ? 'true' : undefined}
               disabled={busy || rolloverBusy}
-              title={busy ? '小管家回复完再新开' : contextSaturated ? '上下文将满，新开一条继续' : '用短交接开启一条新的助理对话'}
-              aria-label={contextSaturated ? '上下文将满，新开一条继续' : '新对话'}
+              title={busy ? copy('newConversationBusy') : contextSaturated ? copy('newConversationFull') : copy('newConversationHint')}
+              aria-label={contextSaturated ? copy('newConversationFull') : copy('newConversation')}
               onClick={() => {
                 setRolloverBusy(true)
                 setSendError(null)
@@ -281,18 +287,18 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
                   if (error !== undefined) setSendError(error)
                 }).finally(() => { setRolloverBusy(false) })
               }}
-            >{rolloverBusy ? '切换中' : '新对话'}</button>
+            >{rolloverBusy ? copy('switching') : copy('newConversation')}</button>
             <button
               type="button"
               className={cls.iconBtn}
-              aria-label={maximized ? '还原窗口' : '最大化'}
+              aria-label={maximized ? copy('restore') : copy('maximize')}
               aria-pressed={maximized}
-              title={maximized ? '还原窗口' : '最大化'}
+              title={maximized ? copy('restore') : copy('maximize')}
               onClick={() => { setMaximized((value) => !value) }}
             >
               <IconFullscreenOutline16 size={14} />
             </button>
-            <button type="button" className={cls.iconBtn} aria-label="收起" title="收起" onClick={() => { setOpen(false) }}>
+            <button type="button" className={cls.iconBtn} aria-label={copy('close')} title={copy('close')} onClick={() => { setOpen(false) }}>
               <IconCloseOutline16 size={14} />
             </button>
           </div>
@@ -305,7 +311,7 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
             }}
           >
             {empty ? (
-              <div className={cls.empty}>小管家还没说过话。发一条消息开始吧。</div>
+              <div className={cls.empty}>{copy('empty')}</div>
             ) : (
               <StandardFlowColumn>
                 {items.map((item) => (
@@ -321,7 +327,7 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
                 ))}
                 {thinking !== undefined && thinking.length > 0 && <StandardFlowItem><StandardReasoningRow text={thinking} running /></StandardFlowItem>}
                 {pending !== undefined && pending.length > 0 && <StandardFlowItem><StandardAssistantMessage text={pending} streaming /></StandardFlowItem>}
-                {busy && <StandardActivityIndicator startTime={snapshot?.turnStartTime} locale={localeSnapshot.active} />}
+                {busy && <StandardActivityIndicator {...(snapshot?.turnStartTime === undefined ? {} : { startTime: snapshot.turnStartTime })} locale={localeSnapshot.active} />}
               </StandardFlowColumn>
             )}
           </div>
@@ -335,6 +341,7 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
               ))}
             </div>
           )}
+          {snapshot?.notice !== undefined && <div className={cls.empty} style={{ padding: '4px 12px 0', margin: 0 }}>{snapshot.notice}</div>}
           {sendError !== null && <div className={cls.empty} style={{ padding: '4px 12px 0', margin: 0 }}>{sendError}</div>}
           <form className={cls.composer} onSubmit={(event) => { event.preventDefault(); send() }}>
             <div className={cls.card}>
@@ -359,8 +366,8 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
                 className={cls.textarea}
                 value={draft}
                 rows={1}
-                placeholder="跟小管家说点什么…"
-                aria-label="消息输入"
+                placeholder={copy('placeholder')}
+                aria-label={copy('input')}
                 onChange={(event) => { setDraft(event.currentTarget.value) }}
                 onPaste={onPaste}
                 onKeyDown={(event) => {
@@ -374,7 +381,7 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
               <div className={cls.row}>
                 <div className={cls.tools}>
                   <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(event) => { onFiles(event.currentTarget.files); event.currentTarget.value = '' }} />
-                  <button type="button" className={cls.add} aria-label="添加图片" onClick={() => { fileRef.current?.click() }}>+</button>
+                  <button type="button" className={cls.add} aria-label={copy('addImage')} onClick={() => { fileRef.current?.click() }}>+</button>
                 </div>
                 <div className={cls.trailing}>
                   <AssistantModelSelect
@@ -386,8 +393,8 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
                       })
                     }}
                   />
-                  <AssistantContextMeter context={context} />
-                  <button type="submit" className={cls.send} disabled={!canSend} aria-label="发送">
+                  <AssistantContextMeter context={context} usedLabel={copy('contextUsed')} />
+                  <button type="submit" className={cls.send} disabled={!canSend} aria-label={copy('send')}>
                     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
                       <path d="M8 13V3M4 7l4-4 4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
@@ -399,11 +406,11 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
         </div>
       )}
       {!(open && maximized) && <div
-        className={!open && lastSeenSeq !== null && (snapshot?.seq ?? 0) > lastSeenSeq ? `${cls.pet} ${cls.petUnread}` : cls.pet}
+        className={shouldShowUnread(open, lastSeenSeq, snapshot?.seq ?? 0) ? `${cls.pet} ${cls.petUnread}` : cls.pet}
         style={{ bottom: anchorBottom }}
         role="button"
         tabIndex={0}
-        aria-label={open ? '收起助理' : '展开助理'}
+        aria-label={open ? copy('collapse') : copy('expand')}
         aria-expanded={open}
         onClick={() => {
           setOpen((value) => {
@@ -423,7 +430,13 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
           event.preventDefault()
           setOpen((value) => {
             const next = !value
-            if (next) followOutputRef.current = true
+            if (next) {
+              followOutputRef.current = true
+              const seq = controller.getSnapshot()?.seq ?? 0
+              setLastSeenSeq(seq)
+              const id = controller.getSnapshot()?.sessionId
+              if (id !== undefined) writeLastSeenSeq(id, seq)
+            }
             return next
           })
         }}
@@ -444,9 +457,9 @@ function TimelineRow({ item, controller, locale, lastAssistantSeq, busy, feedbac
   item: TimelineItem
   controller: AssistantController
   locale: string
-  lastAssistantSeq?: number
+  lastAssistantSeq?: number | undefined
   busy: boolean
-  feedback?: MessageFeedback
+  feedback?: MessageFeedback | undefined
   onFeedback: (next: MessageFeedback) => void
   onBranch: () => void
   onOpenImage: (url: string, alt: string) => void
@@ -462,15 +475,18 @@ function TimelineRow({ item, controller, locale, lastAssistantSeq, busy, feedbac
     ) : undefined
     return <StandardUserMessage text={item.text} images={images} actions={<MessageActions text={item.text} align="end" zh={zh} />} />
   }
+  if (item.kind === 'plugin') {
+    return <div className={cls.taskMarker} data-plugin={item.plugin}>{pluginMarkerLabel(item.plugin, locale)} · {item.text}</div>
+  }
   if (item.kind === 'task-reference') {
-    const omitted = item.receipt.omittedSessions > 0 ? ' · 省略 ' + String(item.receipt.omittedSessions) + ' 条' : ''
-    return <div className={cls.taskMarker}>已引用任务 · {item.receipt.label} · {String(item.receipt.sourceSessionIds.length)} 条来源{omitted}</div>
+    const omitted = item.receipt.omittedSessions > 0 ? ' · ' + localeText(locale, 'omitted') + ' ' + String(item.receipt.omittedSessions) : ''
+    return <div className={cls.taskMarker}>{localeText(locale, 'referenced')} · {item.receipt.label} · {String(item.receipt.sourceSessionIds.length)} {localeText(locale, 'sources')}{omitted}</div>
   }
   if (item.kind === 'error') {
     return <StandardErrorRow text={item.text} locale={locale} />
   }
   if (item.kind === 'tool') {
-    return <StandardToolRow name={item.name} summary={item.summary} status={item.status} input={item.input} output={item.output} />
+    return <StandardToolRow name={item.name} summary={item.summary} status={item.status} {...(item.input === undefined ? {} : { input: item.input })} {...(item.output === undefined ? {} : { output: item.output })} />
   }
   const blocks = item.blocks ?? [{ kind: 'text' as const, text: item.text }]
   const lastText = [...blocks].reverse().find((block) => block.kind === 'text')
@@ -479,7 +495,7 @@ function TimelineRow({ item, controller, locale, lastAssistantSeq, busy, feedbac
       text={item.text}
       align="start"
       showFeedback
-      feedback={feedback}
+      {...(feedback === undefined ? {} : { feedback })}
       onFeedback={onFeedback}
       onBranch={onBranch}
       branchDisabled={busy || lastAssistantSeq !== item.seq}
@@ -518,6 +534,17 @@ function ChatImage({ image, controller, onOpen }: {
   }, [controller, image.attachmentId])
   if (url === undefined) return <span className={cls.thumb} />
   return <img src={url} alt={image.name ?? 'image'} onClick={() => { onOpen(url, image.name ?? 'image') }} />
+}
+
+function localeText(locale: string, key: AssistantKey): string {
+  return locale.toLocaleLowerCase().startsWith('zh') ? zh[key] : en[key]
+}
+
+function pluginMarkerLabel(plugin: string, locale: string): string {
+  if (plugin === 'schedule') return localeText(locale, 'reminder')
+  if (plugin === 'dsh-llm-assistant-duty') return localeText(locale, 'duty')
+  if (plugin === 'dsh-llm-assistant') return localeText(locale, 'handoff')
+  return plugin
 }
 
 const PET_DEFAULT_BOTTOM = 8

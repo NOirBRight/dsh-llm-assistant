@@ -14,12 +14,12 @@ const ROWS = [
   { key: 'messages', label: 'Messages', tint: cls.cmMessages },
 ] as const
 
-export function AssistantContextMeter({ context }: { context: ContextChrome }): JSX.Element {
+export function AssistantContextMeter({ context, usedLabel = 'of context used' }: { context: ContextChrome; usedLabel?: string }): JSX.Element {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLSpanElement | null>(null)
   const percent = Math.min(100, Math.round((context.used / Math.max(context.cap, 1)) * 100))
   const reading = String(percent) + '%'
-  const aria = reading + ' of context used'
+  const aria = reading + ' ' + usedLabel
   const total = context.system + context.tools + context.messages
   const parts = total === 0
     ? [{ key: 'total', tint: undefined, width: percent }]
@@ -67,10 +67,10 @@ export function AssistantContextMeter({ context }: { context: ContextChrome }): 
         </button>
       </Tooltip>
       {open && (
-        <div className={cls.cmPanel} role="dialog" aria-label="Context used">
+        <div className={cls.cmPanel} role="dialog" aria-label={usedLabel}>
           <div className={cls.cmHeader}>
             <span className={cls.cmPercent}>{reading}</span>
-            <span className={cls.cmHeadline}>of context used</span>
+            <span className={cls.cmHeadline}>{usedLabel}</span>
             <span className={cls.cmFigures}>{'~' + formatTokens(context.used) + ' / ' + formatTokens(context.cap)}</span>
           </div>
           <div className={cls.cmBar}>

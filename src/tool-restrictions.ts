@@ -20,11 +20,14 @@ export const DENY_BROWSER = [
 const DENY_ASSISTANT_TOOLS = [
   ...DENY_SPAWN,
   'bash',
+  'pwsh',
   'write',
   'edit',
   'str_replace_editor',
   ...DENY_BROWSER,
 ] as const
+
+const DENY_NAME_PREFIXES = ['worker_', 'browser_'] as const
 
 interface ScopedToolsService {
   restrict(filter: { deny: readonly string[] }): unknown
@@ -47,19 +50,23 @@ function keepDenied(agentCtx: ToolScopeContext, deny: readonly string[]): void {
 
   const restricted = new Set<string>()
   let applying = false
+  const denyName = (name: string): void => {
+    if (restricted.has(name) || scoped.restrict === undefined) return
+    try {
+      scoped.restrict({ deny: [name] })
+      restricted.add(name)
+    } catch (error) {
+      for (const known of knownToolsFromRestrictError(error)) {
+        if (shouldDenyDiscovered(known, deny)) denyName(known)
+      }
+    }
+  }
   const apply = (): void => {
     if (applying) return
     applying = true
     try {
-      for (const name of deny) {
-        if (restricted.has(name)) continue
-        try {
-          scoped.restrict?.({ deny: [name] })
-          restricted.add(name)
-        } catch {
-          // Unknown global name: tools/change will retry after later registration.
-        }
-      }
+      for (const name of deny) denyName(name)
+      denyName('__llm_assistant_unknown_probe__')
     } finally {
       applying = false
     }
@@ -67,6 +74,19 @@ function keepDenied(agentCtx: ToolScopeContext, deny: readonly string[]): void {
 
   agentCtx.on('tools/change', apply)
   apply()
+}
+
+function knownToolsFromRestrictError(error: unknown): string[] {
+  const message = error instanceof Error ? error.message : String(error)
+  const match = message.match(/known global tools: ([^\n]+)/)
+  if (match === null || match[1] === undefined || match[1] === '(none)') return []
+  return match[1].split(', ').map((name) => name.trim()).filter((name) => name !== '')
+}
+
+function shouldDenyDiscovered(name: string, deny: readonly string[]): boolean {
+  if (name.startsWith('__llm_assistant')) return false
+  if (deny.includes(name)) return true
+  return DENY_NAME_PREFIXES.some((prefix) => name.startsWith(prefix))
 }
 
 export function restrictAssistantTools(agentCtx: ToolScopeContext): void {

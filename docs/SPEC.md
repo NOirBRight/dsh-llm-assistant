@@ -24,7 +24,7 @@ AC 编号在 [PLAN.md](./PLAN.md) 中被任务引用。**每条 AC 必须可判�
 | AC-SEAT-6 | 明暗主题下均可读，跟随 DSH 主题变量 | 两种主题各截图一次 |
 | AC-SEAT-7 | 键盘可达：可聚焦、Enter/Space 开合、`aria-expanded` 正确 | 可访问性测试 |
 
-**已完成**：AC-SEAT-1/2/3/5 已实现并验证（`src/client/`）。AC-SEAT-4/6/7 待验证。
+**已完成**：AC-SEAT-1/2/3/5/7 已实现（`src/client/`）。AC-SEAT-4/6 仍以 3082 人工验证为主。
 
 ---
 
@@ -41,7 +41,7 @@ AC 编号在 [PLAN.md](./PLAN.md) 中被任务引用。**每条 AC 必须可判�
 | AC-SESSION-5 | 会话 cwd 不是任何已注册 workspace 的路径 | 断言 cwd ∉ workspace 路径集 |
 | AC-SESSION-6 | 持久化的 id 指向的会话不存在时，能降级为新建而非崩溃 | 删除 session 文件后重启 |
 | AC-SESSION-7 | 助理会话可见 `schedule_create` / `schedule_list` / `schedule_delete` | 工具表断言 |
-| AC-SESSION-8 | 席位 ContextMeter 左侧有「新对话」；running 时禁用，≥85% 时显示警示语义 | 3082 UI + 可访问性树 |
+| AC-SESSION-8 | 席位标题栏有「新对话」（标题右侧、最大化/关闭左侧）；running 时禁用，≥85% 时显示警示语义 | 3082 UI + 可访问性树 |
 | AC-SESSION-9 | rollover RPC 不接收任意 sessionId，只滚动当前助理会话 | RPC 自动化测试 |
 | AC-SESSION-10 | 新会话交接 ≤4 KiB，仅含 goal、未完成 todo、必要路径；无整段 transcript | handoff 自动化测试 |
 | AC-SESSION-11 | 新会话 flush 与 state 原子更新成功后席位才切换；失败保持旧会话 | orchestration 自动化测试 |
@@ -49,8 +49,7 @@ AC 编号在 [PLAN.md](./PLAN.md) 中被任务引用。**每条 AC 必须可判�
 | AC-SESSION-13 | 所有 active schedule 精确迁移到新会话，并在旧会话停用 | schedule adapter 测试 + 3082 实测 |
 | AC-SESSION-14 | 助理加入插件私有 standing composition：可见 `web_search` / `read` / `glob` / `grep` / todo / goal；不可见 bash、write、edit、`browser_*`；该 composition 不出现在主窗口 preset picker | 单元测试 + 3082 工具表与 picker |
 
-**证据**：AC-SESSION-1/2/3/4/7 的可行性已由 `probe.mjs` 实测（见 `probe.log`），但尚未在
-产品代码中实现。
+**证据**：AC-SESSION-1/2/3/6/7/9–14 已在产品代码中实现（常驻会话、接续、私有 preset）。隐藏会话树靠专用 cwd + `archiveSession`。S8 投递、S9 派单、S5 cron、T2.0 列出/察看仍属后续切片。
 
 ---
 

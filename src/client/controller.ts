@@ -88,11 +88,17 @@ export class AssistantController {
       ...(images !== undefined && images.length > 0 ? { images } : {}),
       ...(currentTask === undefined ? {} : { currentTask }),
     }
-    const result = await this.#rpc.call(ASSISTANT_RPC_CHANNEL, ASSISTANT_SEND_ENDPOINT, payload)
-    if (!result.ok) return false
-    this.#setPoll(this.#streamOpen ? IDLE_POLL_INTERVAL_MS : POLL_INTERVAL_MS)
-    await this.#fetch()
-    return true
+    try {
+      const result = await this.#rpc.call(ASSISTANT_RPC_CHANNEL, ASSISTANT_SEND_ENDPOINT, payload)
+      if (!result.ok) return false
+      const value = result.value as { sent?: unknown }
+      if (value.sent !== true) return false
+      this.#setPoll(this.#streamOpen ? IDLE_POLL_INTERVAL_MS : POLL_INTERVAL_MS)
+      await this.#fetch()
+      return true
+    } catch {
+      return false
+    }
   }
 
   async readImage(attachmentId: string): Promise<{ mediaType: string; dataBase64: string } | undefined> {
@@ -102,7 +108,12 @@ export class AssistantController {
   }
 
   async newConversation(): Promise<string | undefined> {
-    const result = await this.#rpc.call(ASSISTANT_RPC_CHANNEL, ASSISTANT_ROLLOVER_ENDPOINT, {})
+    let result: { ok: true; value: unknown } | { ok: false; error: { message: string } }
+    try {
+      result = await this.#rpc.call(ASSISTANT_RPC_CHANNEL, ASSISTANT_ROLLOVER_ENDPOINT, {}) as typeof result
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error)
+    }
     if (!result.ok) return result.error.message
     const value = result.value as { sessionId?: unknown }
     const next = await this.#fetch(true)
@@ -112,18 +123,22 @@ export class AssistantController {
 
   async setModel(model: string, effort?: string, provider?: string): Promise<string | undefined> {
     if (model.trim() === '') return 'empty model'
-    const result = await this.#rpc.call(
-      ASSISTANT_RPC_CHANNEL,
-      ASSISTANT_SET_MODEL_ENDPOINT,
-      {
-        model,
-        ...(effort !== undefined ? { effort } : {}),
-        ...(provider !== undefined ? { provider } : {}),
-      },
-    )
-    if (!result.ok) return result.error.message
-    await this.#fetch()
-    return undefined
+    try {
+      const result = await this.#rpc.call(
+        ASSISTANT_RPC_CHANNEL,
+        ASSISTANT_SET_MODEL_ENDPOINT,
+        {
+          model,
+          ...(effort !== undefined ? { effort } : {}),
+          ...(provider !== undefined ? { provider } : {}),
+        },
+      )
+      if (!result.ok) return result.error.message
+      await this.#fetch()
+      return undefined
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error)
+    }
   }
 
   #startStream(): void {
@@ -189,6 +204,8 @@ export class AssistantController {
       this.#snapshot = snapshot
       for (const listener of this.#listeners) listener()
       return snapshot
+    } catch {
+      return this.#snapshot
     } finally {
       if (epoch === this.#fetchEpoch) this.#fetching = false
     }

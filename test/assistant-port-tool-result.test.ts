@@ -58,4 +58,37 @@ describe('assistant tool timeline projection', () => {
     expect(createAssistantPort(agent, api, () => 0).snapshot().items).toContainEqual(expect.objectContaining({ kind: 'tool', status: 'stopped' }))
   })
 
+  it('projects schedule, duty, and handoff plugin messages instead of dropping them', () => {
+    const agent = {
+      id: 'assistant', status: 'idle',
+      session: {
+        id: 'assistant', seq: 3, header: {},
+        events: [
+          { type: 'user/message', seq: 1, time: 1, data: { source: { kind: 'plugin', plugin: 'schedule' }, content: [{ type: 'text', text: '该喝水了' }] } },
+          { type: 'user/message', seq: 2, time: 2, data: { source: { kind: 'plugin', plugin: 'dsh-llm-assistant-duty' }, content: [{ type: 'text', text: '有卡住的待办' }] } },
+          { type: 'user/message', seq: 3, time: 3, data: { source: { kind: 'plugin', plugin: 'dsh-llm-assistant' }, content: [{ type: 'text', text: '【助理会话交接】' }] } },
+        ],
+        append: () => undefined,
+      },
+      followup: () => undefined, inject: () => undefined, runMaintenance: async (task: () => Promise<unknown>) => task(),
+    } satisfies AssistantAgentView
+    const api = { SessionId: (id: string) => id, createUserMessage: (input: unknown) => input } satisfies AssistantRuntimeApi
+    const items = createAssistantPort(agent, api, () => 0).snapshot().items
+    expect(items).toEqual([
+      expect.objectContaining({ kind: 'plugin', plugin: 'schedule', text: '该喝水了' }),
+      expect.objectContaining({ kind: 'plugin', plugin: 'dsh-llm-assistant-duty', text: '有卡住的待办' }),
+      expect.objectContaining({ kind: 'plugin', plugin: 'dsh-llm-assistant', text: '【助理会话交接】' }),
+    ])
+  })
+
+  it('overlays the model context window onto the projected meter', () => {
+    const agent = {
+      id: 'assistant', status: 'idle',
+      session: { id: 'assistant', seq: 0, header: {}, events: [], append: () => undefined },
+      followup: () => undefined, inject: () => undefined, runMaintenance: async (task: () => Promise<unknown>) => task(),
+    } satisfies AssistantAgentView
+    const api = { SessionId: (id: string) => id, createUserMessage: (input: unknown) => input } satisfies AssistantRuntimeApi
+    const snapshot = createAssistantPort(agent, api, () => 0, () => ({ contextCap: 64_000 })).snapshot()
+    expect(snapshot.context?.cap).toBe(64_000)
+  })
 })

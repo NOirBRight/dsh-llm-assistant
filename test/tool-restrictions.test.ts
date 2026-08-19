@@ -17,7 +17,9 @@ class FakeToolPlane {
 
   readonly restrict = (filter: { deny: readonly string[] }): void => {
     const name = filter.deny[0]
-    if (name === undefined || !this.global.has(name)) throw new Error('unknown tool')
+    if (name === undefined || !this.global.has(name)) {
+      throw new Error('tools.restrict() names unknown global tool "' + String(name) + '"; known global tools: ' + ([...this.global].sort().join(', ') || '(none)'))
+    }
     this.restrictCalls.push(name)
     this.denied.add(name)
     this.emitChange()
@@ -60,5 +62,14 @@ describe('assistant tool restrictions', () => {
       expect([...plane.denied]).toEqual(expect.arrayContaining([...DENY_SPAWN]))
       expect([...plane.global]).toEqual(expect.arrayContaining([...DENY_SPAWN]))
     }
+  })
+
+  it('denies pwsh and later-registered worker_* names', () => {
+    const plane = new FakeToolPlane()
+    plane.register('pwsh')
+    restrictAssistantTools(plane.agentCtx)
+    expect(plane.denied.has('pwsh')).toBe(true)
+    plane.register('worker_later')
+    expect(plane.denied.has('worker_later')).toBe(true)
   })
 })

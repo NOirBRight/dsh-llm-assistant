@@ -2,6 +2,18 @@
 
 DeepSeek Harness 的常驻“DeepSeek 小管家”席位。它拥有独立、可滚动的助理会话，支持对话、图片、提醒和值班心跳。
 
+## 安装
+
+需要 DeepSeek Harness Web（`web-app` bundle，`0.1.0-rc.7`+）。本包的 `cordis.patch.yml` 会插入 `@deepseek-ai/dsh-schedule` 与 `@deepseek-ai/dsh-session-reference`。
+
+发布面：
+
+```bash
+DSH_HOME=~/.dsh dsh plugin --profile web add github:<owner>/dsh-llm-assistant#vX.Y.Z
+```
+
+实验面只在 lab 验证：把 profile 写成 `link:` 到本仓库，用 `DSH_HOME=~/.dsh-lab` 的 3082。不要把 Workstation 路径写进 `~/.dsh`。
+
 ## 引用任务
 
 “引用任务”是小管家可按需调用的 `task_reference` 工具，不是 composer 里的用户选项。页面随每条消息隐式提供当前主任务 anchor；工具不传参数时读取当前任务，也可按标题或 task id 查找其他任务，歧义时不会静默猜选。
@@ -31,8 +43,9 @@ Runner 只接受 `http://127.0.0.1:3082`，会在真实浏览器中进入一条�
 
 管家使用插件私有的 standing composition（`presets/llm-assistant/`），**不出现在主窗口模式 picker**。可见：`web_search`、对自己 cwd 的 `read` / `glob` / `grep`、todo / goal、`schedule_*`、`task_reference`、`view_image`。不可见：bash、write、edit、worker 外派、侧栏 `browser_*`。值班会话不加入该 composition。
 
-## 安全边界
+## 已知限制
 
+- 提醒与心跳依赖 DSH 进程及对应 live 会话；**助理或值班不活着时不会触发**。
+- 本版本不做跨会话投递、派单、cron 日程层，也不提供工作台 Terminal/Browser/批注口。
 - 助理和值班会话不暴露 worker 外派、bash、write 或 edit。
 - 引用任务不创建 fork，也不复制完整 transcript。
-- 提醒与心跳依赖 DSH 进程及对应 live 会话；助理不活着时不会触发。

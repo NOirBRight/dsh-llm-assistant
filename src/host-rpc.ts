@@ -38,7 +38,9 @@ export async function handleAssistantRpc(
       return fail('MODEL_DOES_NOT_SUPPORT_IMAGES', 'Model does not support image input.')
     }
     extras.noteCurrentTask?.(request.currentTask)
-    return { ok: true, value: await port.send(request.text, request.images) }
+    const reply = await port.send(request.text, request.images)
+    if (!reply.sent) return fail('send-failed', reply.error)
+    return { ok: true, value: reply }
   }
   if (endpoint === ASSISTANT_IMAGE_ENDPOINT) {
     const request = decodeImageRequest(payload)

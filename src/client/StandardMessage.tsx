@@ -202,7 +202,7 @@ export function StandardActivityIndicator({ startTime, locale = 'zh' }: { startT
       role="status"
       aria-live="polite"
     >
-      Deep diving...
+      {locale.toLocaleLowerCase().startsWith('zh') ? '正在深入思考…' : 'Deep diving...'}
       {elapsedMs >= 15_000 && (
         <span className={classes(styles.turnStatusClock, 'dsh-assistant-standard-activity-clock')} aria-hidden>
           {formatRunDuration(elapsedMs, locale)}

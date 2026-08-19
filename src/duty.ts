@@ -2,8 +2,10 @@
 
 import { assistantBrief, type AssistantAgentView, type AssistantEvent } from './assistant-port.ts'
 
-/** Lab test floor: native every_seconds minimum is 300. Restore 1800 after testing. */
-export const HEARTBEAT_EVERY_SECONDS = 300
+export const DUTY_PLUGIN = 'dsh-llm-assistant-duty'
+
+/** Native every_seconds floor is 300; product heartbeat is 30 minutes. */
+export const HEARTBEAT_EVERY_SECONDS = 1800
 export const HEARTBEAT_QUIET = 'HEARTBEAT_QUIET'
 export const HEARTBEAT_ALERT = 'HEARTBEAT_ALERT'
 export const HEARTBEAT_SETUP_DONE = 'HEARTBEAT_SETUP_DONE'
@@ -42,6 +44,49 @@ export function heartbeatEverySeconds(events: readonly AssistantEvent[]): number
 
 export function hasHeartbeatSchedule(events: readonly AssistantEvent[]): boolean {
   return heartbeatEverySeconds(events) === HEARTBEAT_EVERY_SECONDS
+}
+
+export function staleHeartbeatIds(events: readonly AssistantEvent[]): string[] {
+  const stale = new Map<string, number>()
+  for (const event of events) {
+    if (event.type !== 'schedule/change') continue
+    const change = event.data as {
+      operation?: unknown
+      schedule?: { kind?: unknown; prompt?: unknown; id?: unknown; everySeconds?: unknown }
+      id?: unknown
+    }
+    if (change.operation === 'create' && change.schedule?.kind === 'every' && typeof change.schedule.prompt === 'string' && change.schedule.prompt.includes('HEARTBEAT')) {
+      if (typeof change.schedule.id === 'string' && typeof change.schedule.everySeconds === 'number') {
+        stale.set(change.schedule.id, change.schedule.everySeconds)
+      }
+    }
+    if (change.operation === 'delete' && typeof change.id === 'string') stale.delete(change.id)
+  }
+  return [...stale].filter(([, everySeconds]) => everySeconds !== HEARTBEAT_EVERY_SECONDS).map(([id]) => id)
+}
+
+export function createHeartbeatSchedule(now = Date.now()): {
+  readonly id: string
+  readonly kind: 'every'
+  readonly prompt: string
+  readonly everySeconds: number
+  readonly scheduledAt: string
+} {
+  return {
+    id: 'heartbeat',
+    kind: 'every',
+    prompt: HEARTBEAT_PROMPT,
+    everySeconds: HEARTBEAT_EVERY_SECONDS,
+    scheduledAt: new Date(now + HEARTBEAT_EVERY_SECONDS * 1000).toISOString(),
+  }
+}
+
+export function installHeartbeatSchedule(agent: { readonly session: { readonly events: readonly AssistantEvent[]; append(type: string, data: unknown): unknown } }): void {
+  for (const id of staleHeartbeatIds(agent.session.events)) {
+    agent.session.append('schedule/change', { version: 1, operation: 'delete', id })
+  }
+  if (hasHeartbeatSchedule(agent.session.events)) return
+  agent.session.append('schedule/change', { version: 1, operation: 'create', schedule: createHeartbeatSchedule() })
 }
 
 export function alertTextOf(events: readonly AssistantEvent[], afterSeq: number): string | undefined {

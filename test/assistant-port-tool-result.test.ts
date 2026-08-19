@@ -81,6 +81,22 @@ describe('assistant tool timeline projection', () => {
     ])
   })
 
+  it('does not paint internal runtime-context plugin snapshots as seat rows', () => {
+    const agent = {
+      id: 'assistant', status: 'idle',
+      session: {
+        id: 'assistant', seq: 1, header: {},
+        events: [
+          { type: 'user/message', seq: 1, time: 1, data: { source: { kind: 'plugin', plugin: 'dsh-system-prompt' }, content: [{ type: 'text', text: '@deepseek-ai/dsh-system-prompt · Current runtime context.' }] } },
+        ],
+        append: () => undefined,
+      },
+      followup: () => undefined, inject: () => undefined, runMaintenance: async (task: () => Promise<unknown>) => task(),
+    } satisfies AssistantAgentView
+    const api = { SessionId: (id: string) => id, createUserMessage: (input: unknown) => input } satisfies AssistantRuntimeApi
+    expect(createAssistantPort(agent, api, () => 0).snapshot().items).toEqual([])
+  })
+
   it('overlays the model context window onto the projected meter', () => {
     const agent = {
       id: 'assistant', status: 'idle',

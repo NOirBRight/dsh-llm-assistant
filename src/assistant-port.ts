@@ -22,6 +22,7 @@ import type {
 } from './contract.ts'
 
 const TASK_REFERENCE_PLUGIN = 'dsh-llm-assistant:task-reference'
+const VISIBLE_PLUGIN_SOURCES = new Set(['schedule', 'dsh-llm-assistant', 'dsh-llm-assistant-duty'])
 
 /** Host view of the live assistant agent (subset of dsh-agent's Agent). */
 export interface AssistantAgentView {
@@ -242,7 +243,7 @@ function project(events: readonly AssistantEvent[]): {
       if (source?.kind === 'plugin' && source.plugin === TASK_REFERENCE_PLUGIN) {
         const receipt = taskReceiptMessage(data)
         if (receipt !== undefined) items.push({ kind: 'task-reference', seq: event.seq, receipt })
-      } else if (source?.kind === 'plugin' && typeof source.plugin === 'string') {
+      } else if (source?.kind === 'plugin' && typeof source.plugin === 'string' && VISIBLE_PLUGIN_SOURCES.has(source.plugin)) {
         const text = textOfBlocks(data.content as readonly unknown[] | undefined)
         if (text !== '') {
           const item: PluginItem = {

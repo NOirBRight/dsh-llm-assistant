@@ -1,6 +1,6 @@
 {
   "name": "dsh-llm-assistant",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A resident assistant Agent seated in the corner of DeepSeek Harness — cross-project recall, delivery, and reminders",
   "type": "module",
   "main": "lib/index.js",

@@ -25,7 +25,3 @@ dsh plugin --profile web add github:NOirBRight/dsh-llm-assistant#v0.1.4
 ```
 
 DeepSeek Harness Web，`0.1.0-rc.7` 或更新。装完重启 Web。
-
-## 这版
-
-README 按产品来写，截图改成 3080 上正在跑的真实任务。

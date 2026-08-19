@@ -12,6 +12,7 @@ A resident assistant Agent that belongs to no project, seated in the corner of t
 本项目的主体：一个由插件持有、不属于任何 workspace 的常驻 root Agent。它有自己的
 session、自己的对话历史、自己的 cwd。它是 DSH 意义上完全普通的一个 Agent —— 没有特权
 API，没有内核补丁，它的全部能力都来自公开的 `ctx.agents` / `ctx.tools` / `ctx.sessionQuery`。
+工具面是插件私有的 standing composition（`presets/llm-assistant`），不进主窗口 preset picker，也不等于 `standard`。
 _Avoid_: 桌宠、吉祥物、subagent、后台服务、守护进程、全局单例
 
 **宠物**:

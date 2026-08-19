@@ -402,3 +402,23 @@ DSH rc.7 没有独立 Task 实体，但已有 `sessionQuery` 的 lineage 查询�
 
 **后果**：用户只提出任务相关问题，小管家在缺少事实时自行引用；无当前任务时工具明确返回不可用。
 每次调用重新取得官方快照，不形成订阅或长期绑定。当前页面 anchor 必须由客户端发送，因此 host 不假设全局“当前会话”。
+
+---
+
+## ADR-016 管家工具面用插件私有 standing composition
+
+**状态**：已接受（用户选择插件私有，不进主窗口 picker）
+
+**背景**：Web 把 `tool-web` / `tool-fs` / `tool-todo` 等从 host 挪到 `standard` agent preset。管家由插件 `agents.create()` 建立，不走 picker，也就不 `agentPresets.mount`。实测模型可见工具只剩 schedule、`task_reference`、`view_image` 和侧栏全局漏进来的 `browser_*`（执行还会被拒）。ADR-010 要留的联网查询因此缺席。现成五种模式都不贴合管家：标准/PTC/创造太宽，极简没有搜索。
+
+**决策**：
+
+1. **不把管家 preset 加入 `agent-presets.roots`。** 加进去 `list()` 就会出现在主窗口模式下拉。组合文件放在插件仓库 `presets/llm-assistant/`，只作声明与测试对齐。
+2. **插件自己做 standing mount。** boot 后用 `dsh-scope.createScope` 建一条本插件持有的 standing 作用域，把 `tool-web` / `tool-fs` / `tool-fs-search` / `tool-todo` / `tool-goal` 挂上去；每个助理 Agent 的 `setup` 里 `bindScopeParent` 接到这条 standing key。机制与官方 `agentPresets.mount` 相同，只是不进 roster。
+3. **join 之后再 `restrict`。** `tool-fs` 会注册 write/edit，它们落在 standing（祖先）层，可以被 deny。同时继续 deny worker 外派、bash、以及侧栏全局的 `browser_*`。`task_reference` 仍注册在助理自己的层。
+4. **值班不 join。** 心跳不需要检索或 todo；值班只保留 schedule + `assistant_brief`，并使用同一套 deny。
+5. **会话 header 不写 `agentPreset`。** 写了 roster 解析不到，cold transcript 的 `standingKeyFor` 会失败。席位用自己的 tool 投影，助理会话又已 archive 出侧栏。
+
+**不采用**：挂 `standard` 再大面积 deny；把 preset 写进 `~/.dsh-lab/.agent-presets`；用创造模式让管家自己改 runtime；把 `browser_*` 留给管家当搜索。
+
+**后果**：主窗口 picker 不变。管家拿到 `web_search`、只读 fs、todo/goal；施工与外派仍不可见。Host 上的 worker 工具 Exposure 不变。

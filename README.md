@@ -27,6 +27,10 @@ pnpm run e2e:lab
 
 Runner 只接受 `http://127.0.0.1:3082`，会在真实浏览器中进入一条主任务、确认席位没有引用按钮/picker/chip、发起一次需要当前任务事实的真实模型请求，并验证小管家自主调用 `task_reference`、原文不作为用户气泡冒出。随后它只重启 `dsh-lab.service`，检查助理会话和标准 tool call/result 历史恢复，并核对 worker 工具隔离日志。它会改动实验助理 transcript 并重启 3082，因此不属于普通单元测试。可用 `CHROME_BIN` 和 `E2E_CDP_PORT` 覆盖浏览器路径与 CDP 端口。
 
+## 工具面
+
+管家使用插件私有的 standing composition（`presets/llm-assistant/`），**不出现在主窗口模式 picker**。可见：`web_search`、对自己 cwd 的 `read` / `glob` / `grep`、todo / goal、`schedule_*`、`task_reference`、`view_image`。不可见：bash、write、edit、worker 外派、侧栏 `browser_*`。值班会话不加入该 composition。
+
 ## 安全边界
 
 - 助理和值班会话不暴露 worker 外派、bash、write 或 edit。

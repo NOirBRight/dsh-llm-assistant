@@ -40,6 +40,7 @@ import { handleAssistantRpc, type AssistantRpcExtras } from './host-rpc.ts'
 import { registerAssistantSse } from './assistant-sse.ts'
 import { captureActiveSchedules, restoreActiveSchedules, retireActiveSchedules, type FoldScheduleEvents } from './schedule-migration.ts'
 import { createSessionRollover, SessionRolloverError, type RolloverAgentHandle, type SessionRollover } from './session-rollover.ts'
+import { createAssistantPreset, ASSISTANT_PRESET_EXPECTED_TOOLS, type AssistantPreset } from './assistant-preset.ts'
 import { DENY_SPAWN, restrictAssistantTools, restrictDutyTools, type ToolScopeContext } from './tool-restrictions.ts'
 import { createTaskReferenceAdapter, type TaskLineageTrace, type TaskReferenceAdapter } from './task-reference.ts'
 import { createTaskReferenceToolDefinition } from './task-reference-tool.ts'
@@ -119,12 +120,12 @@ interface CreateAgentOptions {
   readonly sessionId: string
   readonly meta?: { readonly cwd?: string; readonly origin?: 'subagent' }
   readonly agentOptions?: AgentOptions
-  readonly setup?: (agentCtx: ToolScopeContext) => void
+  readonly setup?: (agentCtx: ToolScopeContext) => void | Promise<void>
 }
 interface ResumeAgentOptions {
   readonly resumeSessionId: string
   readonly agentOptions?: AgentOptions
-  readonly setup?: (agentCtx: ToolScopeContext) => void
+  readonly setup?: (agentCtx: ToolScopeContext) => void | Promise<void>
 }
 interface AgentsService {
   create(options: CreateAgentOptions): Promise<AgentHandle>
@@ -258,7 +259,7 @@ async function createAssistant(
   sessionId: string,
   cwd: string,
   agentOptions: AgentOptions,
-  setup: (agentCtx: ToolScopeContext) => void,
+  setup: (agentCtx: ToolScopeContext) => void | Promise<void>,
 ): Promise<AgentHandle> {
   return agents.create({
     sessionId,
@@ -333,6 +334,14 @@ function logScheduleTools(tools: ToolsService | undefined, agent: AssistantAgent
   const expected = ['schedule_create', 'schedule_list', 'schedule_delete']
   const visible = expected.map((name) => `${name}=${tools?.get(name, agent) !== undefined ? 'yes' : 'no'}`)
   log(`schedule tools: ${visible.join(' ')}`)
+}
+
+/** AC-SESSION-14: assert the private preset's keep-list reached the assistant. */
+function logAssistantPresetTools(tools: ToolsService | undefined, agent: AssistantAgentView): void {
+  const visible = ASSISTANT_PRESET_EXPECTED_TOOLS.map((name) => `${name}=${tools?.get(name, agent) !== undefined ? 'yes' : 'no'}`)
+  const denied = ['bash', 'write', 'edit', 'browser_open', 'delegate_worker'].map((name) => `${name}=${tools?.get(name, agent) !== undefined ? 'LEAK' : 'no'}`)
+  log(`assistant preset tools: ${visible.join(' ')}`)
+  log(`assistant preset deny: ${denied.join(' ')}`)
 }
 
 /** One-shot runtime proof that global worker tools remain while both private scopes deny them. */
@@ -443,6 +452,21 @@ async function run(ctx: Context): Promise<void> {
   mkdirSync(join(home, 'llm-assistant'), { recursive: true })
 
   const runtime = await resolveRuntimeApi()
+  let assistantPreset: AssistantPreset | undefined
+  try {
+    if (process.argv[1] !== undefined) {
+      const hostRequire = createRequire(realpathSync(process.argv[1]))
+      assistantPreset = createAssistantPreset({
+        host: ctx,
+        load: (id) => import(pathToFileURL(hostRequire.resolve(id)).href),
+        log,
+      })
+    } else {
+      log('WARN process.argv[1] is missing — private assistant preset will not mount')
+    }
+  } catch (error) {
+    log('WARN cannot resolve host modules for the private assistant preset: ' + errMsg(error))
+  }
   const selection = defaultModel.currentSelection()
   const agentOptions: AgentOptions = {
     provider: selection.provider,
@@ -477,7 +501,14 @@ async function run(ctx: Context): Promise<void> {
       return inspected.filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== undefined)
     },
   })
-  const wireAssistant = (agentCtx: ToolScopeContext & { agent?: AssistantAgentView }): void => {
+  const wireAssistant = async (agentCtx: ToolScopeContext & { agent?: AssistantAgentView }): Promise<void> => {
+    if (assistantPreset !== undefined) {
+      try {
+        await assistantPreset.join(agentCtx)
+      } catch (error) {
+        log('WARN private preset join failed: ' + errMsg(error))
+      }
+    }
     restrictAssistantTools(agentCtx)
     const scopedTools = agentCtx.get('tools') as ToolsService | undefined
     try {
@@ -534,6 +565,7 @@ async function run(ctx: Context): Promise<void> {
   const assistantOf = (): AssistantAgentView => agent
 
   logScheduleTools(tools, agent)
+  logAssistantPresetTools(tools, agent)
 
   // AC-SESSION-4: keep the assistant out of the sidebar tree (Ungrouped).
   // Archive is the host-owned hide bit; the session stays live and resumable.
@@ -752,6 +784,7 @@ async function run(ctx: Context): Promise<void> {
           hideId(nextId)
           subscribeAssistantEvents(ctx, nextId, revision, () => { hideId(nextId) })
           logScheduleTools(tools, nextHandle.agent)
+          logAssistantPresetTools(tools, nextHandle.agent)
           log('new conversation id=' + nextId + ' archived=' + next.archivedSessionIds.at(-1))
         } catch (error) {
           log('WARN new assistant post-commit setup failed: ' + errMsg(error))

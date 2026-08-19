@@ -8,7 +8,23 @@ export const DENY_SPAWN = [
   'worker_cursor',
 ] as const
 
-const DENY_WORKER_TOOLS = [...DENY_SPAWN, 'bash', 'write', 'edit', 'str_replace_editor'] as const
+/** Sidebar registers these globally; only the current main-session helmsman can run them. */
+export const DENY_BROWSER = [
+  'browser_tabs',
+  'browser_open',
+  'browser_snapshot',
+  'browser_click',
+  'browser_fill',
+] as const
+
+const DENY_ASSISTANT_TOOLS = [
+  ...DENY_SPAWN,
+  'bash',
+  'write',
+  'edit',
+  'str_replace_editor',
+  ...DENY_BROWSER,
+] as const
 
 interface ScopedToolsService {
   restrict(filter: { deny: readonly string[] }): unknown
@@ -54,9 +70,9 @@ function keepDenied(agentCtx: ToolScopeContext, deny: readonly string[]): void {
 }
 
 export function restrictAssistantTools(agentCtx: ToolScopeContext): void {
-  keepDenied(agentCtx, DENY_WORKER_TOOLS)
+  keepDenied(agentCtx, DENY_ASSISTANT_TOOLS)
 }
 
 export function restrictDutyTools(agentCtx: ToolScopeContext): void {
-  keepDenied(agentCtx, DENY_WORKER_TOOLS)
+  keepDenied(agentCtx, DENY_ASSISTANT_TOOLS)
 }

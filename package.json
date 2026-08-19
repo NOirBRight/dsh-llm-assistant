@@ -21,6 +21,7 @@
     "lib/client.js",
     "lib/types/**/*.d.ts",
     "cordis.patch.yml",
+    "presets/**",
     "README.md"
   ],
   "scripts": {

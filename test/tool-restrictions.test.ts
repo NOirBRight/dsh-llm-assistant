@@ -37,9 +37,11 @@ describe('assistant tool restrictions', () => {
   it('retries a denied tool when it is registered after agent setup', () => {
     const plane = new FakeToolPlane()
     plane.register('bash')
+    plane.register('browser_open')
 
     restrictAssistantTools(plane.agentCtx)
     expect(plane.denied.has('delegate_worker')).toBe(false)
+    expect(plane.denied.has('browser_open')).toBe(true)
 
     plane.register('delegate_worker')
 

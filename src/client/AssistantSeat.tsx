@@ -1,10 +1,12 @@
 /** 席位：缩小版主聊天窗口。权限固定，不含 PermissionSelect。 */
 
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type PointerEvent } from 'react'
+import { IconCloseOutline16, IconFullscreenOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { cls } from './css.ts'
 import type { AssistantController } from './controller.ts'
 import { WhaleMark } from './WhaleMark.tsx'
+import { MessageActions, readMessageFeedback, writeMessageFeedback, type MessageFeedback } from './MessageActions.tsx'
 import { StandardActivityIndicator, StandardAssistantMessage, StandardErrorRow, StandardFlowBody, StandardFlowColumn, StandardFlowItem, StandardReasoningRow, StandardToolRow, StandardUserMessage } from './StandardMessage.tsx'
 import { AssistantContextMeter } from './ContextMeter.tsx'
 import { AssistantModelSelect } from './ModelSelect.tsx'
@@ -40,6 +42,8 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
   const [preview, setPreview] = useState<DraftImage | null>(null)
   const [sendError, setSendError] = useState<string | null>(null)
   const [rolloverBusy, setRolloverBusy] = useState(false)
+  const [maximized, setMaximized] = useState(false)
+  const [feedbackByKey, setFeedbackByKey] = useState<Record<string, MessageFeedback>>({})
   const [anchorBottom, setAnchorBottom] = useState(PET_DEFAULT_BOTTOM)
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const followOutputRef = useRef(true)
@@ -204,6 +208,23 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
 
   const empty = items.length === 0 && (pending === undefined || pending.length === 0)
   const canSend = draft.trim().length > 0 || images.length > 0
+  const lastAssistantSeq = [...items].reverse().find((item) => item.kind === 'assistant')?.seq
+  const feedbackFor = (sessionId: string | undefined, seq: number): MessageFeedback | undefined => {
+    if (sessionId === undefined) return undefined
+    return feedbackByKey[sessionId + '.' + String(seq)] ?? readMessageFeedback(sessionId, seq)
+  }
+  const setMessageFeedback = (sessionId: string | undefined, seq: number, next: MessageFeedback): void => {
+    if (sessionId === undefined) return
+    const key = sessionId + '.' + String(seq)
+    const resolved = feedbackFor(sessionId, seq) === next ? undefined : next
+    writeMessageFeedback(sessionId, seq, resolved)
+    setFeedbackByKey((current) => {
+      const copy = { ...current }
+      if (resolved === undefined) delete copy[key]
+      else copy[key] = resolved
+      return copy
+    })
+  }
 
   const onResizeStart = (event: PointerEvent<HTMLDivElement>): void => {
     event.preventDefault()
@@ -221,18 +242,22 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
   const onResizeEnd = (): void => { dragRef.current = null }
 
   useEffect(() => {
-    if (preview === null) return
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setPreview(null)
+      if (event.key !== 'Escape') return
+      if (preview !== null) {
+        setPreview(null)
+        return
+      }
+      if (maximized) setMaximized(false)
     }
     document.addEventListener('keydown', onKey)
     return () => { document.removeEventListener('keydown', onKey) }
-  }, [preview])
+  }, [preview, maximized])
 
   return (
     <div className={cls.root}>
       {open && (
-        <div className={cls.panel} role="dialog" aria-label="DeepSeek 小管家" style={{ width: size.width, height: size.height, bottom: anchorBottom }}>
+        <div className={cls.panel} role="dialog" aria-label="DeepSeek 小管家" data-maximized={maximized || undefined} style={maximized ? undefined : { width: size.width, height: size.height, bottom: anchorBottom }}>
           <div
             className={cls.resize}
             onPointerDown={onResizeStart}
@@ -257,7 +282,19 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
                 }).finally(() => { setRolloverBusy(false) })
               }}
             >{rolloverBusy ? '切换中' : '新对话'}</button>
-            <button type="button" className={cls.close} aria-label="收起" onClick={() => { setOpen(false) }}>×</button>
+            <button
+              type="button"
+              className={cls.iconBtn}
+              aria-label={maximized ? '还原窗口' : '最大化'}
+              aria-pressed={maximized}
+              title={maximized ? '还原窗口' : '最大化'}
+              onClick={() => { setMaximized((value) => !value) }}
+            >
+              <IconFullscreenOutline16 size={14} />
+            </button>
+            <button type="button" className={cls.iconBtn} aria-label="收起" title="收起" onClick={() => { setOpen(false) }}>
+              <IconCloseOutline16 size={14} />
+            </button>
           </div>
           <div
             className={cls.panelBody}
@@ -273,7 +310,13 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
               <StandardFlowColumn>
                 {items.map((item) => (
                   <StandardFlowItem key={item.kind + String(item.seq)}>
-                    <TimelineRow item={item} controller={controller} locale={localeSnapshot.active} onOpenImage={(url, alt) => { setPreview({ id: url, name: alt, mediaType: 'image/png', dataBase64: '', previewUrl: url }) }} />
+                    <TimelineRow item={item} controller={controller} locale={localeSnapshot.active} lastAssistantSeq={lastAssistantSeq} busy={busy || rolloverBusy} feedback={feedbackFor(snapshot?.sessionId, item.seq)} onFeedback={(next) => { setMessageFeedback(snapshot?.sessionId, item.seq, next) }} onBranch={() => {
+                      setRolloverBusy(true)
+                      setSendError(null)
+                      void controller.newConversation().then((error) => {
+                        if (error !== undefined) setSendError(error)
+                      }).finally(() => { setRolloverBusy(false) })
+                    }} onOpenImage={(url, alt) => { setPreview({ id: url, name: alt, mediaType: 'image/png', dataBase64: '', previewUrl: url }) }} />
                   </StandardFlowItem>
                 ))}
                 {thinking !== undefined && thinking.length > 0 && <StandardFlowItem><StandardReasoningRow text={thinking} running /></StandardFlowItem>}
@@ -355,7 +398,7 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
           </form>
         </div>
       )}
-      <div
+      {!(open && maximized) && <div
         className={!open && lastSeenSeq !== null && (snapshot?.seq ?? 0) > lastSeenSeq ? `${cls.pet} ${cls.petUnread}` : cls.pet}
         style={{ bottom: anchorBottom }}
         role="button"
@@ -386,7 +429,7 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
         }}
       >
         <WhaleMark className={cls.petIcon} />
-      </div>
+      </div>}
       {preview !== null && (
         <div className={cls.lightbox} role="dialog" aria-label={preview.name} onClick={() => { setPreview(null) }}>
           <button type="button" className={cls.lightboxClose} aria-label="关闭" onClick={() => { setPreview(null) }}>×</button>
@@ -397,12 +440,18 @@ export function AssistantSeat({ controller, locale, useSessions }: AssistantSeat
   )
 }
 
-function TimelineRow({ item, controller, locale, onOpenImage }: {
+function TimelineRow({ item, controller, locale, lastAssistantSeq, busy, feedback, onFeedback, onBranch, onOpenImage }: {
   item: TimelineItem
   controller: AssistantController
   locale: string
+  lastAssistantSeq?: number
+  busy: boolean
+  feedback?: MessageFeedback
+  onFeedback: (next: MessageFeedback) => void
+  onBranch: () => void
   onOpenImage: (url: string, alt: string) => void
 }): JSX.Element {
+  const zh = locale.toLocaleLowerCase().startsWith('zh')
   if (item.kind === 'user') {
     const images = item.images !== undefined && item.images.length > 0 ? (
       <div className={cls.userImages}>
@@ -411,7 +460,7 @@ function TimelineRow({ item, controller, locale, onOpenImage }: {
         ))}
       </div>
     ) : undefined
-    return <StandardUserMessage text={item.text} images={images} />
+    return <StandardUserMessage text={item.text} images={images} actions={<MessageActions text={item.text} align="end" zh={zh} />} />
   }
   if (item.kind === 'task-reference') {
     const omitted = item.receipt.omittedSessions > 0 ? ' · 省略 ' + String(item.receipt.omittedSessions) + ' 条' : ''
@@ -424,11 +473,24 @@ function TimelineRow({ item, controller, locale, onOpenImage }: {
     return <StandardToolRow name={item.name} summary={item.summary} status={item.status} input={item.input} output={item.output} />
   }
   const blocks = item.blocks ?? [{ kind: 'text' as const, text: item.text }]
+  const lastText = [...blocks].reverse().find((block) => block.kind === 'text')
+  const actions = lastText === undefined ? undefined : (
+    <MessageActions
+      text={item.text}
+      align="start"
+      showFeedback
+      feedback={feedback}
+      onFeedback={onFeedback}
+      onBranch={onBranch}
+      branchDisabled={busy || lastAssistantSeq !== item.seq}
+      zh={zh}
+    />
+  )
   return (
     <StandardFlowBody>
       {blocks.map((block, index) => block.kind === 'reasoning'
         ? <StandardReasoningRow key={index} text={block.text} running={false} />
-        : <StandardAssistantMessage key={index} text={block.text} />)}
+        : <StandardAssistantMessage key={index} text={block.text} actions={block === lastText ? actions : undefined} />)}
     </StandardFlowBody>
   )
 }

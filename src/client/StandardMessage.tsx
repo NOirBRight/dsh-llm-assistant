@@ -13,7 +13,7 @@ import {
   StateDot,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 
-export function StandardAssistantMessage({ text, streaming = false }: { text: string; streaming?: boolean }): JSX.Element {
+export function StandardAssistantMessage({ text, streaming = false, actions }: { text: string; streaming?: boolean; actions?: ReactNode }): JSX.Element {
   const styles = officialFlowStyles.message()
   return (
     <div
@@ -22,6 +22,7 @@ export function StandardAssistantMessage({ text, streaming = false }: { text: st
       data-streaming={streaming || undefined}
     >
       <StandardFlowBody><MarkdownText text={text} streaming={streaming} codeLabels={CODE_LABELS} /></StandardFlowBody>
+      {actions}
     </div>
   )
 }
@@ -137,7 +138,7 @@ export function StandardToolRow({ name, summary, status, input, output }: {
   )
 }
 
-export function StandardUserMessage({ text, images }: { text: string; images?: ReactNode }): JSX.Element {
+export function StandardUserMessage({ text, images, actions }: { text: string; images?: ReactNode; actions?: ReactNode }): JSX.Element {
   const styles = officialFlowStyles.messageItem()
   return (
     <div
@@ -148,6 +149,7 @@ export function StandardUserMessage({ text, images }: { text: string; images?: R
       <div className={classes(styles.userStack, 'dsh-assistant-user-stack')}>
         {images}
         {text !== '' && <div className={classes(styles.bubble, 'dsh-assistant-user-bubble')}>{text}</div>}
+        {actions}
       </div>
     </div>
   )

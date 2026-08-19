@@ -47,6 +47,7 @@ AC 编号在 [PLAN.md](./PLAN.md) 中被任务引用。**每条 AC 必须可判�
 | AC-SESSION-11 | 新会话 flush 与 state 原子更新成功后席位才切换；失败保持旧会话 | orchestration 自动化测试 |
 | AC-SESSION-12 | 旧会话 id 归档保留且不再接受席位写入 | state + 3082 session 观测 |
 | AC-SESSION-13 | 所有 active schedule 精确迁移到新会话，并在旧会话停用 | schedule adapter 测试 + 3082 实测 |
+| AC-SESSION-14 | 助理加入插件私有 standing composition：可见 `web_search` / `read` / `glob` / `grep` / todo / goal；不可见 bash、write、edit、`browser_*`；该 composition 不出现在主窗口 preset picker | 单元测试 + 3082 工具表与 picker |
 
 **证据**：AC-SESSION-1/2/3/4/7 的可行性已由 `probe.mjs` 实测（见 `probe.log`），但尚未在
 产品代码中实现。

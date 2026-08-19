@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync, mkdtempSync, rmSync, existsSync, cpSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const base = new URL('http://127.0.0.1:3082/')
+const base = new URL(process.env.E2E_URL ?? 'http://127.0.0.1:3080/')
 const chromeBin = process.env.CHROME_BIN ?? 'google-chrome'
-const debugPort = Number(process.env.E2E_CDP_PORT ?? '9333')
+const debugPort = Number(process.env.E2E_CDP_PORT ?? '9335')
 const outDir = join(process.cwd(), 'docs/images')
 mkdirSync(outDir, { recursive: true })
 const profile = mkdtempSync(join(tmpdir(), 'dsh-assistant-shots-'))
+const liveProfile = process.env.CHROME_PROFILE
+if (liveProfile && existsSync(liveProfile)) {
+  cpSync(liveProfile, profile, { recursive: true, filter: (src) => !/Singleton/.test(src) })
+}
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms))
 async function waitFor(check, label, timeoutMs = 45_000) {
@@ -54,7 +58,7 @@ const chrome = spawn(chromeBin, [
   '--disable-gpu',
   '--no-first-run',
   '--no-default-browser-check',
-  '--window-size=1440,900',
+  '--window-size=1600,1000',
   '--force-device-scale-factor=1',
   '--hide-scrollbars',
   '--user-data-dir=' + profile,
@@ -85,27 +89,30 @@ try {
   const cdp = new Cdp(ws)
   await cdp.call('Page.enable')
   await cdp.call('Runtime.enable')
-  await cdp.call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
+  await cdp.call('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false })
   await cdp.call('Page.navigate', { url: base.href })
   await waitFor(() => cdp.evaluate("document.readyState === 'complete'"), 'load')
   await waitFor(() => cdp.evaluate("!!document.querySelector('.dsh-assistant-pet,[aria-label=\\'展开助理\\'],[aria-label=\\'Open assistant\\']')"), 'pet', 60_000)
-  await cdp.evaluate("(function(){ var open = document.querySelector('[aria-label=\\'Open sidebar\\']'); if (open) open.click(); var nodes = document.querySelectorAll('button, [role=button], div'); for (var i = 0; i < nodes.length; i++) { var t = (nodes[i].textContent || '').trim(); if (t === 'Ungrouped' || t.indexOf('Ungrouped') === 0) { nodes[i].click(); break; } } })()")
+  await delay(2000)
+  await cdp.evaluate("(function(){ var open = document.querySelector('[aria-label=\\'Open sidebar\\']'); if (open) open.click(); })()")
+  await delay(500)
+  await cdp.evaluate("(function(){ var nodes = Array.from(document.querySelectorAll('button, [role=button]')); for (var i = 0; i < nodes.length; i++) { var t = (nodes[i].textContent || '').trim(); if (t === 'Ungrouped' || t.indexOf('Ungrouped') === 0 || t.indexOf('未分组') === 0) { nodes[i].click(); break; } } })()")
   try {
     await waitFor(() => cdp.evaluate("!!document.querySelector('[aria-label^=\\'Session actions for \\']')"), 'session row', 25_000)
     await cdp.evaluate("(function(){ var action = document.querySelector('[aria-label^=\\'Session actions for \\']'); if (action && action.parentElement) action.parentElement.click(); })()")
-    await waitFor(() => cdp.evaluate("document.querySelector('[data-composer-card],[data-phase=\\'active\\']') !== null"), 'active session', 20_000)
+    await waitFor(() => cdp.evaluate("!!document.querySelector('[data-composer-card], textarea, [data-phase=\\'active\\']')"), 'active session', 20_000)
     console.log('opened a session')
   } catch {
-    console.log('no session list yet, capturing hero')
+    console.log('page text', await cdp.evaluate('document.body.innerText.slice(0,800)'))
   }
   await cdp.evaluate("(function(){ var close = document.querySelector('[aria-label=\\'收起\\'],[aria-label=\\'Close\\']'); if (close) close.click(); })()")
   await delay(800)
   await save(cdp, 'seat-closed.png')
   await cdp.evaluate("(function(){ var pet = document.querySelector('[aria-label=\\'展开助理\\'],[aria-label=\\'Open assistant\\']'); if (pet) pet.click(); })()")
   await waitFor(() => cdp.evaluate("!!document.querySelector('.dsh-assistant-panel,[aria-label=\\'DeepSeek 小管家\\'],[aria-label=\\'DeepSeek Assistant\\']')"), 'panel')
-  await delay(800)
+  await delay(1000)
   await save(cdp, 'seat-open.png')
-  const box = await cdp.evaluate("(function(){ var el = document.querySelector('.dsh-assistant-panel'); if (!el) return null; var r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, scale: 1 }; })()")
+  const box = await cdp.evaluate("(function(){ var el = document.querySelector('.dsh-assistant-panel'); if (!el) return null; var r = el.getBoundingClientRect(); return { x: Math.max(0,r.x), y: Math.max(0,r.y), width: r.width, height: r.height, scale: 1 }; })()")
   if (box && box.width > 0) await save(cdp, 'seat-panel.png', box)
   ws.close()
 } finally {

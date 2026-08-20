@@ -1,6 +1,6 @@
 {
   "name": "dsh-llm-assistant",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Resident DeepSeek assistant seat for DeepSeek Harness: chat, reminders, and on-demand read-only task reference",
   "type": "module",
   "main": "lib/index.js",

@@ -39,7 +39,7 @@ Harness 里已经有二十几个桌宠。它们做的是皮：跟着当前会话
 DeepSeek Harness Web，`0.1.0-rc.7` 或更新。
 
 ```bash
-dsh plugin --profile web add github:NOirBRight/dsh-llm-assistant#v0.1.4
+dsh plugin --profile web add github:NOirBRight/dsh-llm-assistant#v0.1.5
 ```
 
 装完重启 Web。提醒由插件插入官方 schedule。任务引用走官方 `session-reference`：rc.8+ 由 web-app 提供，rc.7 在缺失时由插件补上。
